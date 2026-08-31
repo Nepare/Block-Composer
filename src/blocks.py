@@ -5,6 +5,7 @@ from pathlib import Path
 import frontmatter
 
 import naming
+from block_fields import BlockFields, parse_block_body
 from errors import BlockNotFoundError
 
 
@@ -31,6 +32,13 @@ class Block:
 
     def to_candidate(self) -> naming.Candidate:
         return naming.Candidate(name=self.name, full_text=self.body)
+
+    @property
+    def fields(self) -> BlockFields:
+        """Structured access to this block's own labeled fields (Author, Environment,
+        etc.) — see block_fields.py. Recomputed each access rather than cached, since
+        nothing here guarantees `body` never changes after construction."""
+        return parse_block_body(self.body)
 
     def to_post(self) -> frontmatter.Post:
         meta = {

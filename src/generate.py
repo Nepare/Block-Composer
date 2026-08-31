@@ -27,7 +27,9 @@ def validate_block_shape(body: str) -> None:
         )
 
 
-def _pick_style_examples(schema: str, explicit: list[Block] | None, store: BlockStore) -> list[str]:
+def _pick_style_examples(
+    schema: str, explicit: list[Block] | None, store: BlockStore, settings: Settings
+) -> list[str]:
     if explicit:
         return [b.body for b in explicit]
     pool = [b for b in store.all() if b.schema == schema] or store.all()
@@ -35,7 +37,7 @@ def _pick_style_examples(schema: str, explicit: list[Block] | None, store: Block
         return [b.body for b in pool[:2]]
     # nothing dissected/generated yet — fall back to the shipped sample blocks so
     # `generate` still works out of the box, with a correctly-shaped example to learn from
-    samples_dir = Path(__file__).resolve().parent.parent / "examples" / "sample_blocks"
+    samples_dir = settings.sample_blocks_path
     return [frontmatter.load(str(p)).content for p in sorted(samples_dir.glob("*.md"))[:2]]
 
 
@@ -49,7 +51,7 @@ def run_generate(
 ) -> tuple[Block, NamingDecision, Path | None]:
     store = BlockStore(settings.blocks_path)
     client, model = get_client_and_model(model_spec or settings.models.generate, settings)
-    examples = _pick_style_examples(schema, style_from, store)
+    examples = _pick_style_examples(schema, style_from, store, settings)
     generate_constraints = constraints_module.load(settings, "generate")
     messages = generate_prompt(criteria, examples, generate_constraints)
 

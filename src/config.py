@@ -51,22 +51,41 @@ class PromptConstraintsConfig(BaseModel):
     a place for user-editable negative constraints ("don't do X"). Renameable/movable;
     a missing file is simply treated as no constraints, not an error."""
 
-    generate: str = "prompt_constraints/GENERATE_CONSTRAINTS.md"
-    naming: str = "prompt_constraints/NAMING_CONSTRAINTS.md"
-    mutate: str = "prompt_constraints/MUTATE_CONSTRAINTS.md"
-    compose: str = "prompt_constraints/COMPOSE_CONSTRAINTS.md"
+    generate: str = "input_prompts/constraints/GENERATE_CONSTRAINTS.md"
+    naming: str = "input_prompts/constraints/NAMING_CONSTRAINTS.md"
+    mutate: str = "input_prompts/constraints/MUTATE_CONSTRAINTS.md"
+    compose: str = "input_prompts/constraints/COMPOSE_CONSTRAINTS.md"
+
+
+class ComposeConfig(BaseModel):
+    """Below keyword_search_min_blocks, compose pastes the whole library into one planning
+    prompt (zero extra LLM calls) -- fine for a small library. At or above it, compose
+    extracts categorized keywords from the request (one extra call, the `naming` model
+    tier) and narrows the planning prompt to the top-scoring blocks plus a small sample of
+    unmatched ones, instead of dumping everything in."""
+
+    keyword_search_min_blocks: int = 5
+    keyword_search_top_n: int = 12
+    # bounds requested per category (role/environment/responsibilities/domain) in the
+    # keyword-extraction prompt -- the model is asked for this range, not hard-enforced on
+    # the low end (an LLM can't be forced to invent keywords that aren't there), but the
+    # parsed result is truncated to keywords_per_category_max regardless of what comes back.
+    keywords_per_category_min: int = 0
+    keywords_per_category_max: int = 4
 
 
 class Settings(BaseModel):
     blocks_dir: str = "output/blocks"
     results_dir: str = "output/results"
     templates_path: str = "templates.yaml"
+    sample_blocks_dir: str = "input_prompts/sample_entries"
     provider: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: OpenRouterConfig = Field(default_factory=OpenRouterConfig)
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
     models: ModelsConfig = Field(default_factory=ModelsConfig)
     google: GoogleConfig = Field(default_factory=GoogleConfig)
     constraints: PromptConstraintsConfig = Field(default_factory=PromptConstraintsConfig)
+    compose: ComposeConfig = Field(default_factory=ComposeConfig)
 
     def resolve(self, relative: str | Path) -> Path:
         p = Path(relative)
@@ -83,6 +102,10 @@ class Settings(BaseModel):
     @property
     def templates_file(self) -> Path:
         return self.resolve(self.templates_path)
+
+    @property
+    def sample_blocks_path(self) -> Path:
+        return self.resolve(self.sample_blocks_dir)
 
 
 def load_settings(config_path: Path | str | None = None) -> Settings:

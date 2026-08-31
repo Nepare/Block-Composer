@@ -7,11 +7,12 @@ import constraints as constraints_module
 import generate
 import mutate
 import naming
-from blocks import BlockStore
+from blocks import Block, BlockStore
 from config import Settings
 from errors import BlockValidationError, LLMError
 from llm.prompts import compose_prompt, result_name_prompt
 from llm.router import get_client_and_model
+from retrieval import extract_retrieval_signals, rank_blocks
 
 
 @dataclass
@@ -23,23 +24,54 @@ class ComposeSlot:
     resolved_id: str | None = None
 
 
-def _preview(body: str, max_chars: int = 120) -> str:
-    """A short, live-computed preview of a block's content for the compose catalog — not
-    stored on disk, so it costs nothing until a compose call actually needs it and never
-    goes stale. Truncates at a word boundary rather than cutting mid-word."""
-    lines = [line.strip() for line in body.splitlines() if line.strip() and not line.strip().startswith("#")]
-    text = " ".join(lines)
-    if len(text) <= max_chars:
-        return text
-    return text[:max_chars].rsplit(" ", 1)[0] + "…"
+def _catalog(blocks: list[Block]) -> list[dict]:
+    """Pure formatter — narrowing (if any) already happened in _select_candidate_blocks."""
+    return [{"id": b.id, "tags": b.tags, "body": b.body.strip()} for b in blocks]
 
 
-def _catalog(store: BlockStore, exclude_ids: set[str]) -> list[dict]:
-    return [
-        {"id": b.id, "tags": b.tags, "preview": _preview(b.body)}
-        for b in store.all()
-        if b.id not in exclude_ids
-    ]
+def _select_candidate_blocks(
+    request: str,
+    store: BlockStore,
+    exclude_ids: set[str],
+    settings: Settings,
+    progress: Callable[[str], None],
+) -> list[Block]:
+    """Below settings.compose.keyword_search_min_blocks, every block goes to the planner
+    (today's behavior, zero extra calls). At or above it, extract categorized keywords
+    from the request and narrow to the blocks that actually look relevant, instead of
+    pasting the whole library into the planning prompt."""
+    blocks = [b for b in store.all() if b.id not in exclude_ids]
+    if len(blocks) < settings.compose.keyword_search_min_blocks:
+        return blocks
+
+    naming_client, naming_model = get_client_and_model(settings.models.naming, settings)
+    compose_constraints = constraints_module.load(settings, "compose")
+    progress("Extracting search keywords from request…")
+    signals = extract_retrieval_signals(
+        request,
+        naming_client,
+        naming_model,
+        compose_constraints,
+        min_per_category=settings.compose.keywords_per_category_min,
+        max_per_category=settings.compose.keywords_per_category_max,
+    )
+    keywords = signals.keywords
+    if keywords.is_empty():
+        progress("No usable keywords extracted — searching the full library")
+        return blocks
+
+    progress(
+        f"Keywords — role: {', '.join(keywords.role) or '—'}; "
+        f"environment: {', '.join(keywords.environment) or '—'}; "
+        f"responsibilities: {', '.join(keywords.responsibilities) or '—'}; "
+        f"domain: {', '.join(keywords.domain) or '—'}"
+    )
+    top_n = signals.requested_count or settings.compose.keyword_search_top_n
+    if signals.requested_count:
+        progress(f"Request specifies {signals.requested_count} project(s) — narrowing to top {top_n}")
+    narrowed = rank_blocks(blocks, keywords, top_n=top_n)
+    progress(f"Narrowed to {len(narrowed)} of {len(blocks)} block(s) in the library")
+    return narrowed
 
 
 def _parse_plan_reply(reply: str) -> list[dict]:
@@ -63,7 +95,8 @@ def _plan_with_llm(
     progress: Callable[[str], None],
 ) -> list[ComposeSlot]:
     client, model = get_client_and_model(model_spec or settings.models.compose, settings)
-    catalog = _catalog(store, pinned_ids)
+    candidate_blocks = _select_candidate_blocks(request, store, pinned_ids, settings, progress)
+    catalog = _catalog(candidate_blocks)
     pinned_note = (
         f"Already pinned/handled by the user, do not repeat these: {', '.join(pinned_ids)}"
         if pinned_ids

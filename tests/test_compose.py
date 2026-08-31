@@ -23,6 +23,18 @@ def _seed_library(settings):
     return store
 
 
+def _seed_large_library(settings, count=5):
+    """At/above settings.compose.keyword_search_min_blocks (5 by default) so the
+    keyword-search narrowing path actually engages."""
+    store = BlockStore(settings.blocks_path)
+    for i in range(count):
+        store.save(
+            Block(id="", body=f"## Block {i}\n\nGeneric entry {i}.\n\n**Environment:** Jira\n"),
+            filename_stem=f"block_{i}",
+        )
+    return store
+
+
 def test_pinned_use_and_generate_bypass_the_planner_entirely(settings, fake_router):
     _seed_library(settings)
     client = FakeLLMClient(
@@ -255,6 +267,106 @@ def test_on_progress_is_optional_and_defaults_to_silent(settings, fake_router):
 
     # must not raise just because no on_progress was given
     compose_module.run_compose("", settings=settings, use_ids=["school"])
+
+
+def test_below_threshold_library_skips_keyword_extraction(settings, fake_router):
+    _seed_library(settings)  # 2 blocks, below the default keyword_search_min_blocks (5)
+    plan = json.dumps({"steps": [{"order": 1, "action": "use", "block_id": "school", "criteria": None}]})
+    client = FakeLLMClient(replies=[plan, "school_result"])
+    fake_router(compose_module, client)
+
+    messages: list[str] = []
+    compose_module.run_compose("need a school", settings=settings, on_progress=messages.append)
+
+    joined = "\n".join(messages)
+    assert "Extracting search keywords" not in joined
+    assert "Planning against 2 block(s)" in joined
+    # just the planning call + the result-naming call -- no extra keyword-extraction call
+    assert client.call_count == 2
+
+
+def test_at_threshold_library_extracts_keywords_and_narrows_the_catalog(settings, fake_router):
+    _seed_large_library(settings, count=5)
+    keywords_reply = "ROLE: \nENVIRONMENT: Jira\nRESPONSIBILITIES: \nDOMAIN: \n"
+    plan = json.dumps({"steps": [{"order": 1, "action": "use", "block_id": "block_0", "criteria": None}]})
+    client = FakeLLMClient(replies=[keywords_reply, plan, "result"])
+    fake_router(compose_module, client)
+
+    messages: list[str] = []
+    compose_module.run_compose("need something in Jira", settings=settings, on_progress=messages.append)
+
+    joined = "\n".join(messages)
+    assert "Extracting search keywords" in joined
+    assert "Narrowed to 5 of 5 block(s)" in joined  # all 5 share the matched keyword
+    # keyword-extraction call + planning call + result-naming call
+    assert client.call_count == 3
+    # the planning call's catalog must carry each block's full body, not a truncated preview
+    planning_user_message = client.calls[1]["messages"][1]["content"]
+    assert "**Environment:** Jira" in planning_user_message
+
+
+def test_request_specified_project_count_overrides_the_configured_top_n(settings, fake_router):
+    _seed_large_library(settings, count=6)
+    keywords_reply = "ROLE: \nENVIRONMENT: Jira\nRESPONSIBILITIES: \nDOMAIN: \nPROJECT_COUNT: 2\n"
+    plan = json.dumps({"steps": [{"order": 1, "action": "use", "block_id": "block_0", "criteria": None}]})
+    client = FakeLLMClient(replies=[keywords_reply, plan, "result"])
+    fake_router(compose_module, client)
+
+    messages: list[str] = []
+    compose_module.run_compose(
+        "give me 2 projects that use Jira", settings=settings, on_progress=messages.append
+    )
+
+    joined = "\n".join(messages)
+    assert "Request specifies 2 project(s)" in joined
+    assert "Narrowed to 2 of 6 block(s)" in joined
+
+
+def test_degenerate_project_count_falls_back_to_the_configured_top_n(settings, fake_router):
+    _seed_large_library(settings, count=6)
+    # all 6 match, but PROJECT_COUNT is unparseable -- narrowing must fall back to the
+    # configured default (12), which exceeds the library size, so nothing gets truncated
+    keywords_reply = "ROLE: \nENVIRONMENT: Jira\nRESPONSIBILITIES: \nDOMAIN: \nPROJECT_COUNT: a few\n"
+    plan = json.dumps({"steps": [{"order": 1, "action": "use", "block_id": "block_0", "criteria": None}]})
+    client = FakeLLMClient(replies=[keywords_reply, plan, "result"])
+    fake_router(compose_module, client)
+
+    messages: list[str] = []
+    compose_module.run_compose(
+        "give me projects that use Jira", settings=settings, on_progress=messages.append
+    )
+
+    joined = "\n".join(messages)
+    assert "Request specifies" not in joined
+    assert "Narrowed to 6 of 6 block(s)" in joined
+
+
+def test_degenerate_keyword_reply_falls_back_to_the_full_catalog(settings, fake_router):
+    _seed_large_library(settings, count=5)
+    unparseable_keywords_reply = "I cannot help with that."
+    plan = json.dumps({"steps": [{"order": 1, "action": "use", "block_id": "block_0", "criteria": None}]})
+    client = FakeLLMClient(replies=[unparseable_keywords_reply, plan, "result"])
+    fake_router(compose_module, client)
+
+    messages: list[str] = []
+    compose_module.run_compose("need something", settings=settings, on_progress=messages.append)
+
+    joined = "\n".join(messages)
+    assert "No usable keywords extracted" in joined
+    assert "Planning against 5 block(s)" in joined  # fell back to the full, unnarrowed catalog
+
+
+def test_pinned_slots_are_unaffected_by_a_large_library(settings, fake_router):
+    _seed_large_library(settings, count=5)
+    client = FakeLLMClient(replies=["result_name"])
+    fake_router(compose_module, client)
+
+    # no NL request -> _plan_with_llm never runs, so keyword extraction never fires
+    # regardless of library size
+    slots, result_path = compose_module.run_compose("", settings=settings, use_ids=["block_0"])
+
+    assert slots[0].resolved_id == "block_0"
+    assert client.call_count == 1  # just the result-naming call
 
 
 def test_dry_run_still_reports_the_plan_built_progress_line(settings, fake_router):

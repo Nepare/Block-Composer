@@ -64,7 +64,7 @@ def mutate_prompt(original_body: str, criteria: str, constraints: str = "") -> l
 
 COMPOSE_SYSTEM = (
     "You plan a composed document from a small personal block library, given a "
-    "natural-language request and a catalog of available blocks (id, tags, preview). For "
+    "natural-language request and a catalog of available blocks (id, tags, full content). For "
     "every part of the request, choose one of:\n"
     "  - use <block_id> — an existing block is a close match, reuse it as-is\n"
     "  - mutate <block_id> :: <criteria> — the closest available block is only a partial "
@@ -87,8 +87,8 @@ COMPOSE_SYSTEM = (
 def compose_prompt(
     request: str, catalog: list[dict], pinned_note: str, constraints: str = ""
 ) -> list[dict[str, str]]:
-    catalog_text = "\n".join(
-        f"- {b['id']} (tags: {', '.join(b['tags'])}): {b['preview']}" for b in catalog
+    catalog_text = "\n\n".join(
+        f"### {b['id']} (tags: {', '.join(b['tags'])})\n{b['body']}" for b in catalog
     )
     user = f"Request: {request}\n\nAvailable blocks:\n{catalog_text or '(none)'}"
     if pinned_note:
@@ -112,4 +112,44 @@ def result_name_prompt(content: str, constraints: str = "") -> list[dict[str, st
     return [
         {"role": "system", "content": _with_constraints(RESULT_NAME_SYSTEM, constraints)},
         {"role": "user", "content": f"Composed document:\n{content}\n\nName for this file:"},
+    ]
+
+
+def _keyword_extraction_system(min_per_category: int, max_per_category: int) -> str:
+    count_phrase = (
+        f"{min_per_category}-{max_per_category}" if min_per_category > 0 else f"up to {max_per_category}"
+    )
+    return (
+        "You turn a natural-language request into search keywords for a personal block "
+        "library, so it can be narrowed down before planning. Reply with ONLY these five "
+        "lines, nothing else — no commentary, no code fences. Any line can be left blank "
+        "(just the label, nothing after the colon) if that category doesn't apply to the "
+        "request:\n\n"
+        f"ROLE: <{count_phrase} job title(s) or function(s) implied by the request, "
+        "comma-separated>\n"
+        f"ENVIRONMENT: <{count_phrase} tools, technologies, or resources implied by the "
+        "request, comma-separated>\n"
+        f"RESPONSIBILITIES: <{count_phrase} actions or achievements implied by the "
+        "request, comma-separated>\n"
+        f"DOMAIN: <{count_phrase} industry or subject-area words implied by the request, "
+        "comma-separated>\n"
+        "PROJECT_COUNT: <if the request explicitly asks for a specific number of "
+        "projects/entries, e.g. \"3 projects\" or \"five examples\", that number; otherwise "
+        "leave blank>\n\n"
+        "Keywords should be plain words or short phrases actually implied by the request, "
+        "not invented specifics. Do not explain your choices."
+    )
+
+
+def keyword_extraction_prompt(
+    request: str,
+    constraints: str = "",
+    *,
+    min_per_category: int = 0,
+    max_per_category: int = 4,
+) -> list[dict[str, str]]:
+    system = _keyword_extraction_system(min_per_category, max_per_category)
+    return [
+        {"role": "system", "content": _with_constraints(system, constraints)},
+        {"role": "user", "content": f"Request: {request}"},
     ]
