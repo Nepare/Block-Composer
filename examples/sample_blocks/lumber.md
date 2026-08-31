@@ -18,4 +18,4 @@ This is a lumber.
 - Room with saw
 - Room where uncle Jack sleeps
 
-**Environment:** 10 wood, 3 wool, 2 iron
+**Environment:** 10 wood, 3 wool, 2 iron.

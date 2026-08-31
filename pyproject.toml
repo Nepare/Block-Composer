@@ -11,7 +11,7 @@ dependencies = [
     "rich",
     "openai",
     "python-frontmatter",
-    "pydantic-settings",
+    "pydantic",
     "python-dotenv",
     "pyyaml",
 ]
@@ -47,3 +47,7 @@ packages = ["parsing", "llm", "llm.providers"]
 [tool.ruff]
 line-length = 100
 src = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "tests"]
+testpaths = ["tests"]

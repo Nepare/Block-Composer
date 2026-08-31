@@ -19,4 +19,4 @@ This is a police station.
 - Jail
 - Treasury
 
-**Environment:** 5 wood, 2 iron, 10 gold
+**Environment:** 5 wood, 2 iron, 10 gold.

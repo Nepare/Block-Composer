@@ -1,0 +1,26 @@
+class CvdocsError(Exception):
+    """Base class for all cvdocs errors."""
+
+
+class AuthError(CvdocsError):
+    """Google OAuth / credential problems."""
+
+
+class DocsApiError(CvdocsError):
+    """Google Docs API request failures."""
+
+
+class TemplateError(CvdocsError):
+    """Problems loading or applying templates.yaml."""
+
+
+class BlockValidationError(CvdocsError):
+    """A block (hand-authored, generated, or mutated) fails basic shape checks."""
+
+
+class BlockNotFoundError(CvdocsError):
+    """No block file found for a given id/filename stem."""
+
+
+class LLMError(CvdocsError):
+    """LLM provider/request failures."""
