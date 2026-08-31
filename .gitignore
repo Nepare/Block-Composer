@@ -2,7 +2,7 @@
 .env
 credentials/*.json
 
-# Local data — generated
+# Local generated data
 output/blocks/*.md
 output/results/*.md
 output/results/*.json
