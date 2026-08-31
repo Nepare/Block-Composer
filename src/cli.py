@@ -3,6 +3,7 @@ from typing import Optional
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 from rich.tree import Tree
 
@@ -28,12 +29,19 @@ def _settings():
     return load_settings()
 
 
+def _print_error(exc: Exception) -> None:
+    # Rich treats [...] as markup, and our own bracket-variant filenames
+    # (e.g. "police_station [jail].md") show up in error text constantly — escape() is
+    # what stops that from being silently swallowed instead of printed.
+    console.print(f"[red]{escape(str(exc))}[/red]")
+
+
 @auth_app.command("login")
 def auth_login():
     try:
         auth_module.login(_settings())
     except CvdocsError as exc:
-        console.print(f"[red]{exc}[/red]")
+        _print_error(exc)
         raise typer.Exit(1)
     console.print("[green]Authenticated.[/green]")
 
@@ -42,7 +50,7 @@ def auth_login():
 def auth_status():
     valid, scopes = auth_module.status(_settings())
     if valid:
-        console.print(f"[green]Token valid.[/green] Scopes: {', '.join(scopes) or '(none recorded)'}")
+        console.print(f"[green]Token valid.[/green] Scopes: {escape(', '.join(scopes)) or '(none recorded)'}")
     else:
         console.print("[yellow]Not authenticated — run `cvdocs auth login`.[/yellow]")
 
@@ -59,7 +67,7 @@ def dissect(
             doc, settings=settings, blocks_dir=blocks_dir, templates_path=templates_file
         )
     except CvdocsError as exc:
-        console.print(f"[red]{exc}[/red]")
+        _print_error(exc)
         raise typer.Exit(1)
 
     table = Table(title="Dissect summary")
@@ -67,11 +75,11 @@ def dissect(
     table.add_column("Block")
     table.add_column("Path / note")
     for block, path in result.saved:
-        table.add_row("saved", block.name, str(path))
+        table.add_row("saved", escape(block.name), escape(str(path)))
     for block, path, label in result.variants:
-        table.add_row(f"variant [{label}]", block.name, str(path))
+        table.add_row(escape(f"variant [{label}]"), escape(block.name), escape(str(path)))
     for name, dup_of in result.skipped_duplicates:
-        table.add_row("skipped (duplicate)", name, f"matches {dup_of}")
+        table.add_row("skipped (duplicate)", escape(name), escape(f"matches {dup_of}"))
     console.print(table)
 
 
@@ -88,7 +96,7 @@ def generate(
     try:
         style_blocks = [store.load(bid) for bid in style_from] if style_from else None
     except CvdocsError as exc:
-        console.print(f"[red]{exc}[/red]")
+        _print_error(exc)
         raise typer.Exit(1)
 
     for _ in range(count):
@@ -97,12 +105,12 @@ def generate(
                 criteria, settings=settings, schema=schema, style_from=style_blocks, model_spec=model
             )
         except CvdocsError as exc:
-            console.print(f"[red]{exc}[/red]")
+            _print_error(exc)
             raise typer.Exit(1)
         if decision.action == "skip_duplicate":
-            console.print(f"[yellow]Skipped — duplicate of {decision.duplicate_of}[/yellow]")
+            console.print(f"[yellow]Skipped — duplicate of {escape(decision.duplicate_of or '')}[/yellow]")
         else:
-            console.print(f"[green]Saved[/green] {path}")
+            console.print(f"[green]Saved[/green] {escape(str(path))}")
 
 
 @app.command()
@@ -118,9 +126,9 @@ def mutate(
             block_id, criteria, settings=settings, model_spec=model, in_place=in_place
         )
     except CvdocsError as exc:
-        console.print(f"[red]{exc}[/red]")
+        _print_error(exc)
         raise typer.Exit(1)
-    console.print(f"[green]Saved[/green] {path}")
+    console.print(f"[green]Saved[/green] {escape(str(path))}")
 
 
 @app.command()
@@ -146,7 +154,7 @@ def compose(
             dry_run=dry_run,
         )
     except CvdocsError as exc:
-        console.print(f"[red]{exc}[/red]")
+        _print_error(exc)
         raise typer.Exit(1)
 
     tree = Tree("Compose plan")
@@ -155,13 +163,13 @@ def compose(
         line = f"[{slot.order}] {slot.action} -> {label}"
         if slot.criteria:
             line += f"  ({slot.criteria})"
-        tree.add(line)
+        tree.add(escape(line))
     console.print(tree)
 
     if dry_run:
         console.print("[yellow]Dry run — nothing written.[/yellow]")
     else:
-        console.print(f"[green]Written[/green] {result_path}")
+        console.print(f"[green]Written[/green] {escape(str(result_path))}")
 
 
 @blocks_app.command("list")
@@ -178,7 +186,7 @@ def blocks_list(
     table.add_column("tags")
     table.add_column("schema")
     for b in results:
-        table.add_row(b.id, b.name, ", ".join(b.tags), b.schema or "")
+        table.add_row(escape(b.id), escape(b.name), escape(", ".join(b.tags)), escape(b.schema or ""))
     console.print(table)
 
 
@@ -189,9 +197,9 @@ def blocks_show(block_id: str = typer.Argument(...)):
     try:
         block = store.load(block_id)
     except CvdocsError as exc:
-        console.print(f"[red]{exc}[/red]")
+        _print_error(exc)
         raise typer.Exit(1)
-    console.print(block.body)
+    console.print(escape(block.body))
 
 
 if __name__ == "__main__":

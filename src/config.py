@@ -27,10 +27,13 @@ class ProviderConfig(BaseModel):
 
 
 class ModelsConfig(BaseModel):
-    generate: str = "openrouter:openrouter/free"
-    mutate: str = "openrouter:openrouter/free"
-    compose: str = "openrouter:openrouter/free"
-    naming: str = "openrouter:openrouter/free"
+    # Pinned to a specific free model rather than the "openrouter/free" auto-router alias
+    # — see the comment above `models:` in config.yaml for why. These are only used if
+    # config.yaml is missing entirely; config.yaml is the actual source of truth.
+    generate: str = "openrouter:minimax/minimax-m3:free"
+    mutate: str = "openrouter:minimax/minimax-m3:free"
+    compose: str = "openrouter:minimax/minimax-m3:free"
+    naming: str = "openrouter:minimax/minimax-m3:free"
     local_default: str = "ollama:qwen3-coder-next"
 
 
@@ -42,6 +45,18 @@ class GoogleConfig(BaseModel):
     token_path: str = "credentials/token.json"
 
 
+class PromptConstraintsConfig(BaseModel):
+    """Paths to CLAUDE.md/AGENTS.md-style constraint files, one per LLM-using tool. Each
+    file's content (if it exists) is appended to that tool's system prompt on every call —
+    a place for user-editable negative constraints ("don't do X"). Renameable/movable;
+    a missing file is simply treated as no constraints, not an error."""
+
+    generate: str = "prompt_constraints/GENERATE_CONSTRAINTS.md"
+    naming: str = "prompt_constraints/NAMING_CONSTRAINTS.md"
+    mutate: str = "prompt_constraints/MUTATE_CONSTRAINTS.md"
+    compose: str = "prompt_constraints/COMPOSE_CONSTRAINTS.md"
+
+
 class Settings(BaseModel):
     blocks_dir: str = "output/blocks"
     results_dir: str = "output/results"
@@ -51,6 +66,7 @@ class Settings(BaseModel):
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
     models: ModelsConfig = Field(default_factory=ModelsConfig)
     google: GoogleConfig = Field(default_factory=GoogleConfig)
+    constraints: PromptConstraintsConfig = Field(default_factory=PromptConstraintsConfig)
 
     def resolve(self, relative: str | Path) -> Path:
         p = Path(relative)

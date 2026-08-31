@@ -4,13 +4,11 @@ from dataclasses import dataclass
 from blocks import Block
 from templates import BlockSchema
 
-HEADING_STYLES = {f"HEADING_{i}" for i in range(1, 7)}
-
 
 @dataclass
 class ParaInfo:
     text: str
-    is_heading: bool
+    is_label: bool
     is_bullet: bool
 
 
@@ -19,7 +17,37 @@ def _paragraph_text(paragraph: dict) -> str:
     return "".join(parts).strip()
 
 
-def _iter_cell_paragraphs(content: list[dict]) -> list[ParaInfo]:
+def named_style_bold_defaults(document: dict) -> dict[str, bool]:
+    """Maps namedStyleType -> whether that style is bold *by default*, from the document's
+    own namedStyles. A run's own textStyle.bold, when present, always overrides this."""
+    styles = document.get("namedStyles", {}).get("styles", [])
+    return {
+        s["namedStyleType"]: bool(s.get("textStyle", {}).get("bold", False))
+        for s in styles
+        if "namedStyleType" in s
+    }
+
+
+def _is_bold_paragraph(paragraph: dict, style_defaults: dict[str, bool]) -> bool:
+    """True if the paragraph's first substantive text run is effectively bold — resolving
+    inheritance the way Docs actually renders it, not just reading the run's own override.
+
+    Verified against two real documents with opposite conventions: one where HEADING_2
+    defaults to non-bold and labels explicitly set bold:true (values carry no override),
+    and one where HEADING_2 defaults to bold and labels carry NO override at all (values
+    explicitly set bold:false). Reading only the run's own textStyle.bold — ignoring the
+    named style's default — misreads one of the two as "nothing is ever bold"."""
+    named_style = paragraph.get("paragraphStyle", {}).get("namedStyleType", "NORMAL_TEXT")
+    default_bold = style_defaults.get(named_style, False)
+    for pe in paragraph.get("elements", []):
+        run = pe.get("textRun")
+        if run and run.get("content", "").strip():
+            explicit = run.get("textStyle", {}).get("bold")
+            return default_bold if explicit is None else bool(explicit)
+    return False
+
+
+def _iter_cell_paragraphs(content: list[dict], style_defaults: dict[str, bool]) -> list[ParaInfo]:
     """Linear scan of a table cell's content, transparently flattening into any nested
     table it meets — some Docs add-ons write a field's label+value one table deeper than
     the rest (e.g. a computed "Environment" total), and a nested table's own children are
@@ -31,16 +59,20 @@ def _iter_cell_paragraphs(content: list[dict]) -> list[ParaInfo]:
             text = _paragraph_text(paragraph)
             if not text:
                 continue
-            style = paragraph.get("paragraphStyle", {}).get("namedStyleType", "NORMAL_TEXT")
+            is_bullet = "bullet" in paragraph
             out.append(
-                ParaInfo(text=text, is_heading=style in HEADING_STYLES, is_bullet="bullet" in paragraph)
+                ParaInfo(
+                    text=text,
+                    is_label=_is_bold_paragraph(paragraph, style_defaults) and not is_bullet,
+                    is_bullet=is_bullet,
+                )
             )
             continue
         table = elem.get("table")
         if table is not None:
             for row in table.get("tableRows", []):
                 for cell in row.get("tableCells", []):
-                    out.extend(_iter_cell_paragraphs(cell.get("content", [])))
+                    out.extend(_iter_cell_paragraphs(cell.get("content", []), style_defaults))
     return out
 
 
@@ -57,8 +89,8 @@ def _split_primary(paragraphs: list[ParaInfo]) -> tuple[str, str]:
 def _split_details(
     paragraphs: list[ParaInfo], schema: BlockSchema
 ) -> list[tuple[str, str, list[ParaInfo]]]:
-    """Right cell: each Heading-style paragraph starts a new field; everything until the
-    next heading is that field's value. Returns (raw_label, canonical_name, value_paragraphs)."""
+    """Right cell: each bold-labeled paragraph starts a new field; everything until the
+    next label is that field's value. Returns (raw_label, canonical_name, value_paragraphs)."""
     fields: list[tuple[str, str, list[ParaInfo]]] = []
     current_label: str | None = None
     current_values: list[ParaInfo] = []
@@ -68,7 +100,7 @@ def _split_details(
             fields.append((current_label, schema.canonical_name(current_label), current_values))
 
     for p in paragraphs:
-        if p.is_heading:
+        if p.is_label:
             flush()
             current_label = p.text
             current_values = []
@@ -107,11 +139,13 @@ def _collect_tags(
     return tags
 
 
-def extract_block(row: dict, schema: BlockSchema) -> Block:
+def extract_block(row: dict, schema: BlockSchema, style_defaults: dict[str, bool]) -> Block:
     """One blocks-table row -> one flat-Markdown Block. Deterministic, no LLM."""
     cells = row.get("tableCells", [])
-    primary = _iter_cell_paragraphs(cells[0].get("content", [])) if cells else []
-    details = _iter_cell_paragraphs(cells[1].get("content", [])) if len(cells) > 1 else []
+    primary = _iter_cell_paragraphs(cells[0].get("content", []), style_defaults) if cells else []
+    details = (
+        _iter_cell_paragraphs(cells[1].get("content", []), style_defaults) if len(cells) > 1 else []
+    )
 
     name, description = _split_primary(primary)
     fields = _split_details(details, schema)

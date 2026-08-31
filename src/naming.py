@@ -3,9 +3,12 @@ and for compose's result output.
 
 Decision flow: slugify the candidate's name; if nothing exists at that slug, save it
 plainly with no LLM call; if something does, an exact-content match is skipped as a
-duplicate (pure string comparison); otherwise a cheap model proposes a short bracket
-label describing what's different, and the candidate is saved as `<slug> [<label>].md`.
-The file with no bracket is always the "first"/anchor — later arrivals get the bracket,
+duplicate (pure string comparison); otherwise a cheap model proposes a short variant
+label describing what's different, and the candidate is saved as `<slug>_mut_<label>.md`
+— filename/CLI-safe (no spaces, no brackets — those can't be typed as a block id without
+quoting, and don't survive being re-mutated cleanly). "mut" here just means "variant of",
+not necessarily "went through the mutate tool" — dissect/generate collisions use it too.
+The file with no suffix is always the "first"/anchor — later arrivals get the suffix,
 never the other way around.
 """
 
@@ -18,9 +21,9 @@ from llm.client import LLMClient
 NAMING_SYSTEM_PROMPT = (
     "You name variant files in a small personal library. Given an existing entry and a "
     "new, similar one that collided on the same base name, reply with ONLY a short 1-3 "
-    "word bracket label (lowercase, no punctuation besides spaces) that captures what "
-    "makes the new one different from the existing one, e.g. 'local', 'remote', "
-    "'hosted'. Do not repeat the base name and do not explain yourself."
+    "word label (lowercase, letters/numbers/spaces only) that captures what makes the new "
+    "one different from the existing one, e.g. 'local', 'remote', 'hosted'. Do not repeat "
+    "the base name and do not explain yourself."
 )
 
 
@@ -33,9 +36,9 @@ def unique_stem(base: str, exists: Callable[[str], bool]) -> str:
     if not exists(base):
         return base
     n = 2
-    while exists(f"{base} {n}"):
+    while exists(f"{base}_{n}"):
         n += 1
-    return f"{base} {n}"
+    return f"{base}_{n}"
 
 
 @dataclass
@@ -63,22 +66,35 @@ def _is_exact_match(a: Candidate, b: Candidate) -> bool:
     )
 
 
-def _propose_label(candidate: Candidate, reference: Candidate, client: LLMClient, model: str) -> str:
+def _propose_label(
+    candidate: Candidate, reference: Candidate, client: LLMClient, model: str, constraints: str = ""
+) -> str:
     prompt = (
         f"Existing entry:\n{reference.full_text}\n\n"
         f"New entry that collided with it on the same name:\n{candidate.full_text}\n\n"
-        "Bracket label for the new entry:"
+        "Label for the new entry:"
     )
+    system = NAMING_SYSTEM_PROMPT
+    if constraints:
+        system = f"{system}\n\n## User constraints — follow these strictly\n{constraints}"
     reply = client.chat(
         [
-            {"role": "system", "content": NAMING_SYSTEM_PROMPT},
+            {"role": "system", "content": system},
             {"role": "user", "content": prompt},
         ],
         model,
         temperature=0.2,
-        max_tokens=20,
+        max_tokens=40,
     )
-    return reply.strip().strip("[]").strip() or "variant"
+    # bound to the first non-empty line: a model that ignores the "only the label"
+    # instruction and rambles must never have that whole ramble become the file name
+    lines = [line.strip() for line in reply.strip().splitlines() if line.strip()]
+    label = lines[0].strip("[]").strip() if lines else ""
+    # a real label is a short phrase, not a sentence -- if it's implausibly long, the
+    # model likely explained itself instead of answering; fall back rather than use it
+    if len(label.split()) > 6:
+        return "variant"
+    return label or "variant"
 
 
 def decide(
@@ -88,8 +104,11 @@ def decide(
     exists: Callable[[str], bool],
     naming_client: LLMClient,
     naming_model: str,
+    constraints: str = "",
 ) -> NamingDecision:
-    """`existing` is (filename_stem, Candidate) pairs already sharing the candidate's base slug."""
+    """`existing` is (filename_stem, Candidate) pairs already sharing the candidate's base
+    slug. `constraints` is the caller's already-loaded NAMING_CONSTRAINTS.md content, if
+    any — naming.py stays decoupled from Settings/file IO by design, so callers load it."""
     base_slug = slugify(candidate.name)
     if not existing:
         return NamingDecision(action="save_plain", stem=base_slug)
@@ -99,6 +118,6 @@ def decide(
             return NamingDecision(action="skip_duplicate", stem=None, duplicate_of=stem)
 
     _reference_stem, reference = existing[0]
-    label = _propose_label(candidate, reference, naming_client, naming_model)
-    stem = unique_stem(f"{base_slug} [{slugify(label)}]", exists)
+    label = _propose_label(candidate, reference, naming_client, naming_model, constraints)
+    stem = unique_stem(f"{base_slug}_mut_{slugify(label)}", exists)
     return NamingDecision(action="save_variant", stem=stem, label=label, called_llm=True)

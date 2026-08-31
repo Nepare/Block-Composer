@@ -1,7 +1,17 @@
 """Prompt templates. Every LLM interaction in cvdocs works on flat Markdown or plain text
 in and out — never nested JSON for content — the one exception being compose's own plan,
 which legitimately needs structured multi-field output to describe *which* action to take
-per slot, distinct from the document content itself."""
+per slot, distinct from the document content itself.
+
+Every builder here takes an optional `constraints` string (see constraints.py) — the
+content of a user-editable CLAUDE.md/AGENTS.md-style file for that tool, appended to the
+system prompt when non-empty. This is where a user says what a tool should NOT do."""
+
+
+def _with_constraints(system: str, constraints: str) -> str:
+    if not constraints:
+        return system
+    return f"{system}\n\n## User constraints — follow these strictly\n{constraints}"
 
 
 GENERATE_SYSTEM = (
@@ -12,8 +22,8 @@ GENERATE_SYSTEM = (
 )
 
 
-def generate_prompt(criteria: str, style_examples: list[str]) -> list[dict[str, str]]:
-    messages = [{"role": "system", "content": GENERATE_SYSTEM}]
+def generate_prompt(criteria: str, style_examples: list[str], constraints: str = "") -> list[dict[str, str]]:
+    messages = [{"role": "system", "content": _with_constraints(GENERATE_SYSTEM, constraints)}]
     for example in style_examples:
         messages.append(
             {"role": "user", "content": f"Example entry for style/shape reference:\n{example}"}
@@ -24,25 +34,37 @@ def generate_prompt(criteria: str, style_examples: list[str]) -> list[dict[str, 
 
 MUTATE_SYSTEM = (
     "You adapt one entry from a small personal block library into a variant, per a change "
-    "request, keeping the exact same field shape (same headings/labels present, just "
-    "updated content). Reply with ONLY this format, nothing else:\n\n"
+    "request. Keep the same field shape (same headings/labels present) — but apply the "
+    "change request across the WHOLE entry, not just its description. Go field by field: "
+    "for each one, decide whether the change request affects it, and if it does, rewrite "
+    "that field's content to fit — don't leave a field holding the original's stale "
+    "details just because the change request didn't mention that field by name. A reply "
+    "that only edits the description while every other field still describes the old, "
+    "unchanged subject is wrong and incomplete.\n\n"
+    "Keep the entry's name in the heading unchanged unless the change request turns it "
+    "into a genuinely different subject rather than a variant of the original — in that "
+    "case give it a real new name instead of keeping the old one. If you do rename it, "
+    "make sure the rest of the entry was actually rewritten to match the new subject too, "
+    "not left describing the old one under a new title.\n\n"
+    "Reply with ONLY this format, nothing else:\n\n"
     "===BODY===\n"
     "<the full updated Markdown entry, same shape as the original>\n"
     "===LABEL===\n"
-    "<a short 1-3 word bracket label summarizing the change, lowercase, e.g. \"sheriff\">"
+    "<if the name stayed the same: a short 1-3 word label summarizing the change, "
+    "lowercase. If you gave it a new name instead, just repeat that new name here.>"
 )
 
 
-def mutate_prompt(original_body: str, criteria: str) -> list[dict[str, str]]:
+def mutate_prompt(original_body: str, criteria: str, constraints: str = "") -> list[dict[str, str]]:
     return [
-        {"role": "system", "content": MUTATE_SYSTEM},
+        {"role": "system", "content": _with_constraints(MUTATE_SYSTEM, constraints)},
         {"role": "user", "content": f"Original entry:\n{original_body}\n\nChange request: {criteria}"},
     ]
 
 
 COMPOSE_SYSTEM = (
     "You plan a composed document from a small personal block library, given a "
-    "natural-language request and a catalog of available blocks (id, tags, summary). For "
+    "natural-language request and a catalog of available blocks (id, tags, preview). For "
     "every part of the request, choose one of:\n"
     "  - use <block_id> — an existing block is a close match, reuse it as-is\n"
     "  - mutate <block_id> :: <criteria> — the closest available block is only a partial "
@@ -62,14 +84,32 @@ COMPOSE_SYSTEM = (
 )
 
 
-def compose_prompt(request: str, catalog: list[dict], pinned_note: str) -> list[dict[str, str]]:
+def compose_prompt(
+    request: str, catalog: list[dict], pinned_note: str, constraints: str = ""
+) -> list[dict[str, str]]:
     catalog_text = "\n".join(
-        f"- {b['id']} (tags: {', '.join(b['tags'])}): {b['summary']}" for b in catalog
+        f"- {b['id']} (tags: {', '.join(b['tags'])}): {b['preview']}" for b in catalog
     )
     user = f"Request: {request}\n\nAvailable blocks:\n{catalog_text or '(none)'}"
     if pinned_note:
         user += f"\n\n{pinned_note}"
     return [
-        {"role": "system", "content": COMPOSE_SYSTEM},
+        {"role": "system", "content": _with_constraints(COMPOSE_SYSTEM, constraints)},
         {"role": "user", "content": user},
+    ]
+
+
+RESULT_NAME_SYSTEM = (
+    "You name a file for a composed document, based on its actual content. Reply with "
+    "ONLY a short, descriptive name, 2-5 words, lowercase, words separated by underscores "
+    "(e.g. 'mining_town', 'vulkan_plugin_specialist', "
+    "'vibecoding_course_table_of_contents'). Do not explain yourself, do not add a file "
+    "extension."
+)
+
+
+def result_name_prompt(content: str, constraints: str = "") -> list[dict[str, str]]:
+    return [
+        {"role": "system", "content": _with_constraints(RESULT_NAME_SYSTEM, constraints)},
+        {"role": "user", "content": f"Composed document:\n{content}\n\nName for this file:"},
     ]

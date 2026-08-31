@@ -14,7 +14,6 @@ class Block:
     body: str
     schema: str | None = None
     tags: list[str] = field(default_factory=list)
-    summary: str = ""
     source: str = "manual"
     created_by: str = "manual"
     created_at: datetime | None = None
@@ -37,7 +36,6 @@ class Block:
         meta = {
             "id": self.id,
             "tags": self.tags,
-            "summary": self.summary or self._auto_summary(),
             "source": self.source,
             "created_by": self.created_by,
             "created_at": (self.created_at or datetime.now(timezone.utc)).isoformat(),
@@ -49,9 +47,6 @@ class Block:
         if self.mutated_from:
             meta["mutated_from"] = self.mutated_from
         return frontmatter.Post(self.body.strip() + "\n", **meta)
-
-    def _auto_summary(self) -> str:
-        return " ".join(self.body.split())[:150]
 
     @classmethod
     def from_post(cls, post: frontmatter.Post, *, default_id: str) -> "Block":
@@ -70,7 +65,6 @@ class Block:
             body=post.content,
             schema=meta.get("schema"),
             tags=list(meta.get("tags") or []),
-            summary=meta.get("summary", ""),
             source=meta.get("source", "manual"),
             created_by=meta.get("created_by", "manual"),
             created_at=created_at,
@@ -113,10 +107,10 @@ class BlockStore:
         ]
 
     def siblings(self, base_slug: str) -> list[Block]:
-        """Every block sharing a base slug: `<base_slug>.md` and `<base_slug> [x].md`."""
+        """Every block sharing a base slug: `<base_slug>.md` and `<base_slug>_mut_x.md`."""
         out = []
         for path in sorted(self.root.glob(f"{base_slug}*.md")):
-            if path.stem == base_slug or path.stem.startswith(f"{base_slug} ["):
+            if path.stem == base_slug or path.stem.startswith(f"{base_slug}_mut_"):
                 out.append(Block.from_post(frontmatter.load(str(path)), default_id=path.stem))
         return out
 
@@ -134,11 +128,7 @@ class BlockStore:
             results = [b for b in results if b.source == source]
         if query:
             q = query.lower()
-            results = [
-                b
-                for b in results
-                if q in b.name.lower() or q in b.summary.lower() or q in b.body.lower()
-            ]
+            results = [b for b in results if q in b.name.lower() or q in b.body.lower()]
         return results
 
     def save_with_dedup(
@@ -147,10 +137,11 @@ class BlockStore:
         *,
         naming_client,
         naming_model: str,
+        naming_constraints: str = "",
     ) -> tuple[naming.NamingDecision, Path | None]:
         """The shared dissect/generate entry point: brand-new name -> saved immediately, no
         LLM call; exact duplicate of an existing block -> skipped; partial match -> one
-        cheap-model call to produce a bracketed variant name (see naming.decide)."""
+        cheap-model call to produce a variant name (see naming.decide)."""
         base_slug = naming.slugify(block.name)
         existing = [(b.id, b.to_candidate()) for b in self.siblings(base_slug)]
         decision = naming.decide(
@@ -159,6 +150,7 @@ class BlockStore:
             exists=self.exists,
             naming_client=naming_client,
             naming_model=naming_model,
+            constraints=naming_constraints,
         )
         if decision.action == "skip_duplicate":
             return decision, None

@@ -28,13 +28,38 @@ class OpenRouterClient:
                 "OPENROUTER_API_KEY is not set — add it to .env. The free tier costs $0 "
                 "but still needs a key from https://openrouter.ai/keys."
             )
-        try:
-            response = self._client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
-        except Exception as exc:
-            raise LLMError(f"OpenRouter request failed ({model}): {exc}") from exc
-        return response.choices[0].message.content or ""
+
+        # A free/auto-routed model can land on a different underlying provider each call.
+        # Two distinct failure modes are worth one extra attempt each, since a retry often
+        # lands somewhere that behaves: (a) a "reasoning" model burning max_tokens on
+        # invisible thinking and returning nothing, and (b) OpenRouter passing an upstream
+        # error (rate limit, provider outage) through as an HTTP 200 with `choices: null`
+        # instead of raising — the SDK never sees this as an exception at all.
+        last_error_detail = None
+        for attempt in range(2):
+            try:
+                response = self._client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    extra_body={"reasoning": {"exclude": True}},
+                )
+            except Exception as exc:
+                raise LLMError(f"OpenRouter request failed ({model}): {exc}") from exc
+
+            if not response.choices:
+                err = getattr(response, "error", None)
+                last_error_detail = getattr(err, "message", None) or str(err) if err else "no choices returned"
+                continue
+
+            choice = response.choices[0]
+            content = choice.message.content or ""
+            if content or choice.finish_reason != "length":
+                return content
+            last_error_detail = f"used its whole token budget (max_tokens={max_tokens}) without producing output"
+
+        raise LLMError(
+            f"OpenRouter model {model!r} failed twice in a row: {last_error_detail}. "
+            "Retry, raise max_tokens, or pick a different model."
+        )

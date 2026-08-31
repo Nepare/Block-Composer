@@ -2,6 +2,7 @@ from pathlib import Path
 
 import frontmatter
 
+import constraints as constraints_module
 from blocks import Block, BlockStore
 from config import Settings
 from errors import BlockValidationError
@@ -10,15 +11,19 @@ from llm.router import get_client_and_model
 from naming import NamingDecision
 
 
-def _validate_generated_body(body: str) -> None:
+def validate_block_shape(body: str) -> None:
+    """Shared by generate and mutate — both must produce a body that's plausibly a real
+    entry: a heading and at least one labeled field. (Placeholder text the model might
+    echo back unfilled, e.g. "<the full updated entry...>", fails the heading check below
+    since it doesn't start with "#".)"""
     stripped = body.strip()
     if not stripped:
-        raise BlockValidationError("Generated block is empty.")
+        raise BlockValidationError("Block body is empty.")
     if not stripped.startswith("#"):
-        raise BlockValidationError("Generated block must start with a Markdown heading (the name).")
+        raise BlockValidationError("Block body must start with a Markdown heading (the name).")
     if "**" not in stripped:
         raise BlockValidationError(
-            "Generated block has no labeled fields (expected at least one **Label:** line)."
+            "Block body has no labeled fields (expected at least one **Label:** line)."
         )
 
 
@@ -45,11 +50,12 @@ def run_generate(
     store = BlockStore(settings.blocks_path)
     client, model = get_client_and_model(model_spec or settings.models.generate, settings)
     examples = _pick_style_examples(schema, style_from, store)
-    messages = generate_prompt(criteria, examples)
+    generate_constraints = constraints_module.load(settings, "generate")
+    messages = generate_prompt(criteria, examples, generate_constraints)
 
-    body = client.chat(messages, model, temperature=0.5, max_tokens=600)
+    body = client.chat(messages, model, temperature=0.5, max_tokens=900)
     try:
-        _validate_generated_body(body)
+        validate_block_shape(body)
     except BlockValidationError:
         # one automatic re-prompt, telling the model what was wrong
         retry_messages = messages + [
@@ -60,8 +66,8 @@ def run_generate(
                 "ONLY a correctly-shaped entry.",
             },
         ]
-        body = client.chat(retry_messages, model, temperature=0.5, max_tokens=600)
-        _validate_generated_body(body)
+        body = client.chat(retry_messages, model, temperature=0.5, max_tokens=900)
+        validate_block_shape(body)
 
     block = Block(
         id="",
@@ -72,5 +78,11 @@ def run_generate(
         generation_criteria=criteria,
     )
     naming_client, naming_model = get_client_and_model(settings.models.naming, settings)
-    decision, path = store.save_with_dedup(block, naming_client=naming_client, naming_model=naming_model)
+    naming_constraints = constraints_module.load(settings, "naming")
+    decision, path = store.save_with_dedup(
+        block,
+        naming_client=naming_client,
+        naming_model=naming_model,
+        naming_constraints=naming_constraints,
+    )
     return block, decision, path

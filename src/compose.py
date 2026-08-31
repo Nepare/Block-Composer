@@ -1,15 +1,15 @@
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 
+import constraints as constraints_module
 import generate
 import mutate
 import naming
 from blocks import BlockStore
 from config import Settings
 from errors import BlockValidationError, LLMError
-from llm.prompts import compose_prompt
+from llm.prompts import compose_prompt, result_name_prompt
 from llm.router import get_client_and_model
 
 
@@ -22,20 +22,35 @@ class ComposeSlot:
     resolved_id: str | None = None
 
 
+def _preview(body: str, max_chars: int = 120) -> str:
+    """A short, live-computed preview of a block's content for the compose catalog — not
+    stored on disk, so it costs nothing until a compose call actually needs it and never
+    goes stale. Truncates at a word boundary rather than cutting mid-word."""
+    lines = [line.strip() for line in body.splitlines() if line.strip() and not line.strip().startswith("#")]
+    text = " ".join(lines)
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars].rsplit(" ", 1)[0] + "…"
+
+
 def _catalog(store: BlockStore, exclude_ids: set[str]) -> list[dict]:
     return [
-        {"id": b.id, "tags": b.tags, "summary": b.summary or b.name}
+        {"id": b.id, "tags": b.tags, "preview": _preview(b.body)}
         for b in store.all()
         if b.id not in exclude_ids
     ]
 
 
-def _extract_json(text: str) -> str:
-    start = text.find("{")
-    end = text.rfind("}")
+def _parse_plan_reply(reply: str) -> list[dict]:
+    start = reply.find("{")
+    end = reply.rfind("}")
     if start == -1 or end == -1:
-        raise LLMError(f"No JSON object found in compose planner reply:\n{text}")
-    return text[start : end + 1]
+        raise LLMError(f"No JSON object found in compose planner reply:\n{reply}")
+    try:
+        data = json.loads(reply[start : end + 1])
+        return data["steps"]
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise LLMError(f"Compose planner returned an unparsable plan: {exc}\n---\n{reply}") from exc
 
 
 def _plan_with_llm(
@@ -52,13 +67,23 @@ def _plan_with_llm(
         if pinned_ids
         else ""
     )
-    messages = compose_prompt(request, catalog, pinned_note)
-    reply = client.chat(messages, model, temperature=0.3, max_tokens=800)
+    compose_constraints = constraints_module.load(settings, "compose")
+    messages = compose_prompt(request, catalog, pinned_note, compose_constraints)
+    reply = client.chat(messages, model, temperature=0.3, max_tokens=1200)
     try:
-        data = json.loads(_extract_json(reply))
-        steps = data["steps"]
-    except (json.JSONDecodeError, KeyError, TypeError) as exc:
-        raise LLMError(f"Compose planner returned an unparsable plan: {exc}\n---\n{reply}") from exc
+        steps = _parse_plan_reply(reply)
+    except LLMError:
+        # one retry -- openrouter/free can route to a different, better-behaved model
+        retry_messages = messages + [
+            {"role": "assistant", "content": reply},
+            {
+                "role": "user",
+                "content": "That reply wasn't a JSON object in the required shape. Reply "
+                "again with ONLY the JSON object, no commentary, no code fences.",
+            },
+        ]
+        reply = client.chat(retry_messages, model, temperature=0.3, max_tokens=1200)
+        steps = _parse_plan_reply(reply)
 
     slots = []
     for i, step in enumerate(steps):
@@ -87,6 +112,11 @@ def run_compose(
     store = BlockStore(settings.blocks_path)
     use_ids = use_ids or []
     generate_criteria = generate_criteria or []
+
+    if not request.strip() and not use_ids and not generate_criteria:
+        raise BlockValidationError(
+            "compose needs a request, --use, or --generate — nothing to do with all three empty."
+        )
 
     for uid in use_ids:
         store.load(uid)  # raises BlockNotFoundError early if a pinned id doesn't exist
@@ -136,30 +166,32 @@ def run_compose(
     bodies = [store.load(s.resolved_id).body.strip() for s in ordered if s.resolved_id]
     content = "\n\n---\n\n".join(bodies)
 
-    result_path = _save_result(request, content, settings, out_path)
-    manifest = {
-        "request": request,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "slots": [
-            {
-                "order": s.order,
-                "action": s.action,
-                "block_id": s.block_id,
-                "criteria": s.criteria,
-                "resolved_id": s.resolved_id,
-            }
-            for s in ordered
-        ],
-    }
-    manifest_path = result_path.with_name(result_path.stem + "_manifest.json")
-    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-
+    result_path = _save_result(content, settings, out_path)
     return ordered, result_path
 
 
-def _save_result(request: str, content: str, settings: Settings, out_path: Path | None) -> Path:
-    """Goes through the same naming.decide() flow as blocks: brand-new title -> saved
-    plainly; a same-slug result already exists -> exact-match reuse or a bracket variant."""
+def _generate_result_name(content: str, settings: Settings) -> str:
+    """A short, descriptive name for the composed result, synthesized from the *whole*
+    composed content — not derived from the raw request text (long, conversational, a
+    poor filename) and not routed to the cheap naming model: unlike naming's usual job
+    (spot the difference between two short blocks), this has to actually read and
+    summarize a multi-block document, which a small local model tends to do lazily (e.g.
+    just echoing one source block's own heading back). Uses the same tier as compose's
+    planning call. E.g. "mining_town", "vulkan_plugin_specialist", not a slug of the NL
+    request or a copy of one ingredient block's name."""
+    client, model = get_client_and_model(settings.models.compose, settings)
+    compose_constraints = constraints_module.load(settings, "compose")
+    reply = client.chat(result_name_prompt(content, compose_constraints), model, temperature=0.2, max_tokens=20)
+    lines = [line.strip() for line in reply.strip().splitlines() if line.strip()]
+    name = lines[0].strip("[]").strip() if lines else ""
+    if not name or len(name.split()) > 6:
+        return "result"
+    return name
+
+
+def _save_result(content: str, settings: Settings, out_path: Path | None) -> Path:
+    """Goes through the same naming.decide() flow as blocks: brand-new name -> saved
+    plainly; a same-slug result already exists -> exact-match reuse or a _mut_ variant."""
     if out_path:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(content, encoding="utf-8")
@@ -168,23 +200,25 @@ def _save_result(request: str, content: str, settings: Settings, out_path: Path 
     results_dir = settings.results_path
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    title = request.strip() or "result"
+    title = _generate_result_name(content, settings)
     base_slug = naming.slugify(title)[:60].rstrip("_") or "result"
     candidate = naming.Candidate(name=title, full_text=content)
 
     existing = [
         (p.stem, naming.Candidate(name=title, full_text=p.read_text(encoding="utf-8")))
         for p in results_dir.glob(f"{base_slug}*.md")
-        if p.stem == base_slug or p.stem.startswith(f"{base_slug} [")
+        if p.stem == base_slug or p.stem.startswith(f"{base_slug}_mut_")
     ]
 
     naming_client, naming_model = get_client_and_model(settings.models.naming, settings)
+    naming_constraints = constraints_module.load(settings, "naming")
     decision = naming.decide(
         candidate,
         existing,
         exists=lambda stem: (results_dir / f"{stem}.md").exists(),
         naming_client=naming_client,
         naming_model=naming_model,
+        constraints=naming_constraints,
     )
 
     if decision.action == "skip_duplicate":
