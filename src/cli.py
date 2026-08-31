@@ -152,6 +152,7 @@ def compose(
             model_spec=model,
             max_generate=max_generate,
             dry_run=dry_run,
+            on_progress=lambda msg: console.print(f"[dim]{escape(msg)}[/dim]"),
         )
     except CvdocsError as exc:
         _print_error(exc)

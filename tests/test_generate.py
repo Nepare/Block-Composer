@@ -50,7 +50,7 @@ def test_run_generate_falls_back_to_shipped_samples_when_library_is_empty(settin
 
     sent = client.calls[0]["messages"]
     combined = " ".join(m["content"] for m in sent)
-    assert "Police Station" in combined or "Lumber" in combined
+    assert "Sample Project One" in combined or "Sample Project Two" in combined
 
 
 def test_run_generate_prefers_explicit_style_from_over_library(settings, fake_router):

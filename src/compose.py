@@ -1,6 +1,7 @@
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import constraints as constraints_module
 import generate
@@ -59,6 +60,7 @@ def _plan_with_llm(
     pinned_ids: set[str],
     settings: Settings,
     model_spec: str | None,
+    progress: Callable[[str], None],
 ) -> list[ComposeSlot]:
     client, model = get_client_and_model(model_spec or settings.models.compose, settings)
     catalog = _catalog(store, pinned_ids)
@@ -69,11 +71,13 @@ def _plan_with_llm(
     )
     compose_constraints = constraints_module.load(settings, "compose")
     messages = compose_prompt(request, catalog, pinned_note, compose_constraints)
+    progress(f"Planning against {len(catalog)} block(s) in the library…")
     reply = client.chat(messages, model, temperature=0.3, max_tokens=1200)
     try:
         steps = _parse_plan_reply(reply)
     except LLMError:
         # one retry -- openrouter/free can route to a different, better-behaved model
+        progress("Planner reply wasn't valid — retrying once…")
         retry_messages = messages + [
             {"role": "assistant", "content": reply},
             {
@@ -108,7 +112,14 @@ def run_compose(
     model_spec: str | None = None,
     max_generate: int = 8,
     dry_run: bool = False,
+    on_progress: Callable[[str], None] | None = None,
 ) -> tuple[list[ComposeSlot], Path | None]:
+    """`on_progress`, if given, is called with a short status line at each meaningful step
+    (plan built, before/after each mutate or generate) — compose can otherwise run for
+    minutes with zero output, since it's a chain of several sequential LLM calls. Kept as
+    a plain callback rather than importing Rich here, so this stays usable as a library and
+    testable without a console."""
+    progress = on_progress or (lambda _msg: None)
     store = BlockStore(settings.blocks_path)
     use_ids = use_ids or []
     generate_criteria = generate_criteria or []
@@ -134,7 +145,7 @@ def run_compose(
 
     planned_slots: list[ComposeSlot] = []
     if request.strip():
-        planned_slots = _plan_with_llm(request, store, set(use_ids), settings, model_spec)
+        planned_slots = _plan_with_llm(request, store, set(use_ids), settings, model_spec, progress)
         for i, slot in enumerate(planned_slots):
             slot.order = total_pinned + i + 1
 
@@ -146,26 +157,40 @@ def run_compose(
             f"Compose plan needs {generate_calls} new blocks, more than --max-generate={max_generate}."
         )
 
+    mutate_calls = sum(1 for s in all_slots if s.action == "mutate")
+    use_calls = len(all_slots) - generate_calls - mutate_calls
+    progress(
+        f"Plan built: {len(all_slots)} step(s) — {use_calls} use, {mutate_calls} mutate, "
+        f"{generate_calls} generate"
+    )
+
     if dry_run:
         for slot in all_slots:
             if slot.action in ("use", "pinned_use"):
                 slot.resolved_id = slot.block_id
         return all_slots, None
 
-    for slot in all_slots:
+    total = len(all_slots)
+    for i, slot in enumerate(sorted(all_slots, key=lambda s: s.order), start=1):
         if slot.action in ("use", "pinned_use"):
             slot.resolved_id = slot.block_id
+            progress(f"[{i}/{total}] use -> {slot.block_id}")
         elif slot.action == "mutate":
+            progress(f"[{i}/{total}] mutating {slot.block_id}…")
             _block, path = mutate.run_mutate(slot.block_id, slot.criteria or "", settings=settings)
             slot.resolved_id = path.stem
+            progress(f"[{i}/{total}] mutated -> {slot.resolved_id}")
         elif slot.action in ("generate", "pinned_generate"):
+            progress(f"[{i}/{total}] generating new block…")
             _block, decision, path = generate.run_generate(slot.criteria or "", settings=settings)
             slot.resolved_id = path.stem if path else decision.duplicate_of
+            progress(f"[{i}/{total}] generated -> {slot.resolved_id}")
 
     ordered = sorted(all_slots, key=lambda s: s.order)
     bodies = [store.load(s.resolved_id).body.strip() for s in ordered if s.resolved_id]
     content = "\n\n---\n\n".join(bodies)
 
+    progress("Naming result…")
     result_path = _save_result(content, settings, out_path)
     return ordered, result_path
 

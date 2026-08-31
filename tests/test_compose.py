@@ -216,3 +216,59 @@ def test_planning_call_includes_constraints_file_in_the_system_prompt(settings, 
     # the result-naming call now shares the compose tier -- confirm it gets the same file too
     naming_system_message = client.calls[1]["messages"][0]["content"]
     assert "Prefer mutate over generate." in naming_system_message
+
+
+def test_on_progress_fires_after_plan_and_around_each_mutate_and_generate(settings, fake_router):
+    _seed_library(settings)
+    plan = json.dumps(
+        {
+            "steps": [
+                {"order": 1, "action": "mutate", "block_id": "police_station", "criteria": "adapt"},
+                {"order": 2, "action": "generate", "block_id": None, "criteria": "a sawmill"},
+            ]
+        }
+    )
+    mutate_reply = "===BODY===\n## Sheriff Station\n\nAdapted.\n\n**Rooms:**\n- Office\n===LABEL===\nsheriff"
+    generate_reply = "## Sawmill\n\nCuts logs.\n\n**Rooms:**\n- Saw room\n"
+    client = FakeLLMClient(replies=[plan, mutate_reply, generate_reply, "town_result"])
+    fake_router(compose_module, client)
+    fake_router(mutate_module, client)
+    fake_router(generate_module, client)
+
+    messages: list[str] = []
+    compose_module.run_compose(
+        "need law enforcement and lumber", settings=settings, on_progress=messages.append
+    )
+
+    joined = "\n".join(messages)
+    assert "Plan built: 2 step(s)" in joined
+    assert any("mutating police_station" in m for m in messages)
+    assert any(m.startswith("[1/2] mutated ->") for m in messages)
+    assert any("generating new block" in m for m in messages)
+    assert any(m.startswith("[2/2] generated ->") for m in messages)
+    assert "Naming result…" in messages
+
+
+def test_on_progress_is_optional_and_defaults_to_silent(settings, fake_router):
+    _seed_library(settings)
+    fake_router(compose_module, FakeLLMClient(replies=["school_overview"]))
+
+    # must not raise just because no on_progress was given
+    compose_module.run_compose("", settings=settings, use_ids=["school"])
+
+
+def test_dry_run_still_reports_the_plan_built_progress_line(settings, fake_router):
+    _seed_library(settings)
+    plan = json.dumps(
+        {"steps": [{"order": 1, "action": "generate", "block_id": None, "criteria": "a hospital"}]}
+    )
+    fake_router(compose_module, FakeLLMClient(replies=[plan]))
+
+    messages: list[str] = []
+    compose_module.run_compose(
+        "need a hospital", settings=settings, dry_run=True, on_progress=messages.append
+    )
+
+    assert any("Plan built: 1 step(s)" in m for m in messages)
+    # dry-run must not execute the generate step
+    assert not any("generating new block" in m for m in messages)
