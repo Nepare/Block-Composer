@@ -66,6 +66,11 @@ class ComposeConfig(BaseModel):
 
     keyword_search_min_blocks: int = 5
     keyword_search_top_n: int = 12
+    # a small, fixed number of zero-scoring blocks always included alongside the top-scoring
+    # ones, so a block keyword-matching missed isn't invisible to the planner as a possible
+    # mutate/generate gap-filler -- fixed rather than proportional to keyword_search_top_n,
+    # since a proportional reserve collapses to 0 for a small request-driven top_n.
+    keyword_search_unmatched_reserve: int = 2
     # bounds requested per category (role/environment/responsibilities/domain) in the
     # keyword-extraction prompt -- the model is asked for this range, not hard-enforced on
     # the low end (an LLM can't be forced to invent keywords that aren't there), but the

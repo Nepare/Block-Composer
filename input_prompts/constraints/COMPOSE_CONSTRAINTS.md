@@ -13,4 +13,5 @@ and its result-naming call. Empty by default. Add negative constraints here, e.g
   before the plan is built. The planning call is still the one responsible for the actual
   count: it must assemble exactly that many final use/mutate/generate steps, no more and no
   fewer -- narrowing the candidates isn't enough on its own.
+- When you get a role instead of a request, treat it as "We need a <role> for our project".
 - Don't create overviews, summaries, tables of content. Only create the entries of the same level as the typical block is. The blocks folder is single-level library.

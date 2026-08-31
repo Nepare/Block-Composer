@@ -69,7 +69,9 @@ def _select_candidate_blocks(
     top_n = signals.requested_count or settings.compose.keyword_search_top_n
     if signals.requested_count:
         progress(f"Request specifies {signals.requested_count} project(s) — narrowing to top {top_n}")
-    narrowed = rank_blocks(blocks, keywords, top_n=top_n)
+    narrowed = rank_blocks(
+        blocks, keywords, top_n=top_n, unmatched_reserve=settings.compose.keyword_search_unmatched_reserve
+    )
     progress(f"Narrowed to {len(narrowed)} of {len(blocks)} block(s) in the library")
     return narrowed
 

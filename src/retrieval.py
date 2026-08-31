@@ -158,15 +158,19 @@ def score_block(block: Block, keywords: CategorizedKeywords) -> ScoredBlock:
     return ScoredBlock(block=block, score=score, matched=matched)
 
 
-def rank_blocks(blocks: list[Block], keywords: CategorizedKeywords, *, top_n: int) -> list[Block]:
+def rank_blocks(
+    blocks: list[Block], keywords: CategorizedKeywords, *, top_n: int, unmatched_reserve: int = 2
+) -> list[Block]:
     """Top-scoring blocks first, plus a small deterministic sample of zero-scoring blocks
-    (up to top_n // 3, sorted by id) so a block that shares no keywords isn't invisible to
-    the planner as a possible mutate/generate gap-filler."""
+    (up to unmatched_reserve, sorted by id) so a block that shares no keywords isn't
+    invisible to the planner as a possible mutate/generate gap-filler. Fixed rather than
+    proportional to top_n -- a top_n // 3 reserve collapses to 0 for a small request-driven
+    top_n (e.g. 2 or 3), silently removing the exact safety net it exists to provide."""
     scored = [score_block(b, keywords) for b in blocks]
     matched_sorted = sorted((s for s in scored if s.score > 0), key=lambda s: s.score, reverse=True)
     unmatched_sorted = sorted((s for s in scored if s.score == 0), key=lambda s: s.block.id)
 
-    reserve = max(0, top_n // 3)
+    reserve = min(unmatched_reserve, len(unmatched_sorted))
     top_matched = matched_sorted[:top_n]
     filler = unmatched_sorted[:reserve]
 

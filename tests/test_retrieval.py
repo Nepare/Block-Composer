@@ -103,7 +103,7 @@ def test_rank_blocks_truncates_matched_blocks_to_top_n():
     assert len(ranked) == 3
 
 
-def test_rank_blocks_includes_a_bounded_reserve_of_unmatched_blocks():
+def test_rank_blocks_includes_a_fixed_reserve_of_unmatched_blocks():
     keywords = CategorizedKeywords(environment=["Jira"])
     matched = Block(id="matched", body="## A\n\n**Environment:** Jira\n")
     unmatched = [Block(id=f"u{i}", body=f"## U{i}\n\nNo overlap.\n") for i in range(10)]
@@ -113,7 +113,30 @@ def test_rank_blocks_includes_a_bounded_reserve_of_unmatched_blocks():
     ranked_ids = [b.id for b in ranked]
     assert "matched" in ranked_ids
     unmatched_included = [i for i in ranked_ids if i.startswith("u")]
-    assert 0 < len(unmatched_included) <= 6 // 3
+    assert len(unmatched_included) == 2  # the fixed reserve, plenty of unmatched to draw from
+
+
+def test_rank_blocks_reserve_is_fixed_regardless_of_a_small_top_n():
+    # a small request-driven top_n (e.g. 2) must not shrink the reserve to 0 -- that was
+    # the exact bug with the old top_n // 3 formula
+    keywords = CategorizedKeywords(environment=["Jira"])
+    matched = Block(id="matched", body="## A\n\n**Environment:** Jira\n")
+    unmatched = [Block(id=f"u{i}", body=f"## U{i}\n\nNo overlap.\n") for i in range(10)]
+
+    ranked = rank_blocks([matched] + unmatched, keywords, top_n=2)
+
+    unmatched_included = [b.id for b in ranked if b.id.startswith("u")]
+    assert len(unmatched_included) == 2
+
+
+def test_rank_blocks_reserve_is_capped_by_available_unmatched_blocks():
+    keywords = CategorizedKeywords(environment=["Jira"])
+    matched = Block(id="matched", body="## A\n\n**Environment:** Jira\n")
+    only_one_unmatched = [Block(id="u0", body="## U0\n\nNo overlap.\n")]
+
+    ranked = rank_blocks([matched] + only_one_unmatched, keywords, top_n=6)
+
+    assert len(ranked) == 2  # matched + the single available unmatched block, not padded to 2
 
 
 def test_rank_blocks_with_empty_keywords_returns_only_the_reserve():
@@ -123,7 +146,7 @@ def test_rank_blocks_with_empty_keywords_returns_only_the_reserve():
     ranked = rank_blocks(blocks, keywords, top_n=6)
 
     # nothing can score > 0 against empty keywords -- everything is "unmatched"
-    assert len(ranked) <= 6 // 3
+    assert len(ranked) == 2
 
 
 def test_extract_keywords_truncates_to_max_per_category_even_if_model_returns_more():
