@@ -7,3 +7,4 @@ Add negative constraints here as you find you need them, e.g.:
   by the change request.
 - Keep the tone consistent with the original entry unless asked to change it.
 -->
+- You may invent new environment or responsibilities entries that weren't in the original or implied by the change request, but only if it's only logical.
