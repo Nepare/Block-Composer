@@ -1,3 +1,4 @@
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -13,6 +14,12 @@ def _fake_openai_response(text):
     resp = MagicMock()
     resp.choices = [MagicMock(message=MagicMock(content=text))]
     return resp
+
+
+def _fake_urlopen_cm(payload: dict):
+    cm = MagicMock()
+    cm.__enter__.return_value.read.return_value = json.dumps(payload).encode("utf-8")
+    return cm
 
 
 @patch("llm.providers.openrouter.OpenAI")
@@ -52,34 +59,45 @@ def test_openrouter_wraps_sdk_exceptions_as_llmerror(mock_openai_cls):
         client.chat([{"role": "user", "content": "hi"}], "openrouter/free")
 
 
-@patch("llm.providers.ollama.OpenAI")
-def test_ollama_chat_returns_content_with_no_api_key_needed(mock_openai_cls):
-    mock_client = MagicMock()
-    mock_client.chat.completions.create.return_value = _fake_openai_response("local reply")
-    mock_openai_cls.return_value = mock_client
+@patch("llm.providers.ollama.urllib.request.urlopen")
+def test_ollama_chat_returns_content_with_no_api_key_needed(mock_urlopen):
+    mock_urlopen.return_value = _fake_urlopen_cm({"message": {"content": "local reply"}})
 
     client = OllamaClient(base_url="http://localhost:11434")
-    result = client.chat([{"role": "user", "content": "hi"}], "qwen3-coder-next")
+    result = client.chat([{"role": "user", "content": "hi"}], "qwen3:1.7b")
 
     assert result == "local reply"
 
 
-@patch("llm.providers.ollama.OpenAI")
-def test_ollama_wraps_connection_errors_as_llmerror(mock_openai_cls):
-    mock_client = MagicMock()
-    mock_client.chat.completions.create.side_effect = RuntimeError("connection refused")
-    mock_openai_cls.return_value = mock_client
+@patch("llm.providers.ollama.urllib.request.urlopen")
+def test_ollama_disables_thinking_and_passes_options_through(mock_urlopen):
+    """Verified live against a real Qwen3 model: without `think: false`, a hybrid-
+    reasoning model can burn its whole token budget on invisible thinking and return
+    nothing — this must be sent on every request, not just opt-in."""
+    mock_urlopen.return_value = _fake_urlopen_cm({"message": {"content": "ok"}})
+
+    client = OllamaClient()
+    client.chat([{"role": "user", "content": "hi"}], "qwen3:1.7b", temperature=0.2, max_tokens=40)
+
+    request = mock_urlopen.call_args[0][0]
+    body = json.loads(request.data)
+    assert body["model"] == "qwen3:1.7b"
+    assert body["think"] is False
+    assert body["options"]["temperature"] == 0.2
+    assert body["options"]["num_predict"] == 40
+
+
+@patch("llm.providers.ollama.urllib.request.urlopen")
+def test_ollama_wraps_connection_errors_as_llmerror(mock_urlopen):
+    mock_urlopen.side_effect = RuntimeError("connection refused")
 
     client = OllamaClient()
     with pytest.raises(LLMError):
-        client.chat([{"role": "user", "content": "hi"}], "qwen3-coder-next")
+        client.chat([{"role": "user", "content": "hi"}], "qwen3:1.7b")
 
 
-@patch("llm.providers.ollama.OpenAI")
 @patch("llm.providers.openrouter.OpenAI")
-def test_router_dispatches_by_provider_and_caches_per_provider_not_per_model(
-    mock_openrouter_openai, mock_ollama_openai
-):
+def test_router_dispatches_by_provider_and_caches_per_provider_not_per_model(mock_openrouter_openai):
     settings = Settings()
 
     client1, model1 = get_client_and_model("openrouter:openrouter/free", settings)

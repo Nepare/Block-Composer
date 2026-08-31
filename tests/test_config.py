@@ -1,11 +1,25 @@
+from pathlib import Path
+
 from config import Settings, load_settings
+
+PROJECT_CONFIG = Path(__file__).resolve().parent.parent / "config.yaml"
+
+
+def test_real_config_yaml_sends_naming_local_and_everything_else_to_openrouter():
+    """naming is the cheapest, least quality-sensitive task -- it's the one deliberately
+    routed to a local Ollama model instead of the pinned OpenRouter default."""
+    settings = load_settings(PROJECT_CONFIG)
+    assert settings.models.naming.startswith("ollama:")
+    assert settings.models.generate.startswith("openrouter:")
+    assert settings.models.mutate.startswith("openrouter:")
+    assert settings.models.compose.startswith("openrouter:")
 
 
 def test_defaults_when_config_file_is_missing(tmp_path):
     settings = load_settings(tmp_path / "missing.yaml")
     assert settings.blocks_dir == "output/blocks"
-    assert settings.models.generate == "openrouter:openrouter/free"
-    assert settings.models.naming == "openrouter:openrouter/free"
+    assert settings.models.generate == "openrouter:minimax/minimax-m3:free"
+    assert settings.models.naming == "openrouter:minimax/minimax-m3:free"
 
 
 def test_load_settings_reads_yaml_overrides(tmp_path):

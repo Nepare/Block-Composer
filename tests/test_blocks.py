@@ -64,14 +64,14 @@ def test_load_missing_block_raises(tmp_path):
         store.load("nope")
 
 
-def test_siblings_matches_base_and_bracketed_variants_only(tmp_path):
+def test_siblings_matches_base_and_variant_names_only(tmp_path):
     store = BlockStore(tmp_path)
     store.save(Block(id="", body="## Police Station\n\nA.\n"), filename_stem="police_station")
-    store.save(Block(id="", body="## Police Station\n\nB.\n"), filename_stem="police_station [jail]")
+    store.save(Block(id="", body="## Police Station\n\nB.\n"), filename_stem="police_station_mut_jail")
     store.save(Block(id="", body="## Lumber\n\nC.\n"), filename_stem="lumber")
 
     siblings = store.siblings("police_station")
-    assert {b.id for b in siblings} == {"police_station", "police_station [jail]"}
+    assert {b.id for b in siblings} == {"police_station", "police_station_mut_jail"}
 
 
 def test_search_by_tag_and_query(tmp_path):
@@ -101,7 +101,7 @@ def test_save_with_dedup_brand_new_then_variant_on_conflict(tmp_path):
     b2 = Block(id="", body="## Police Station\n\nHas a jail.\n", created_by="dissected")
     decision2, path2 = store.save_with_dedup(b2, naming_client=fake2, naming_model="m")
     assert decision2.action == "save_variant"
-    assert path2.name == "police_station [jail].md"
+    assert path2.name == "police_station_mut_jail.md"
     assert fake2.call_count == 1
 
     # the anchor file must be untouched by the variant write
@@ -123,3 +123,19 @@ def test_save_with_dedup_exact_repeat_is_skipped_and_writes_nothing(tmp_path):
     assert decision.action == "skip_duplicate"
     assert path is None
     assert len(list(tmp_path.glob("*.md"))) == 1
+
+
+def test_save_with_dedup_forwards_naming_constraints_to_the_llm(tmp_path):
+    store = BlockStore(tmp_path)
+    store.save(Block(id="", body="## Police Station\n\nA.\n"), filename_stem="police_station")
+
+    client = FakeLLMClient(replies=["jail"])
+    store.save_with_dedup(
+        Block(id="", body="## Police Station\n\nHas a jail.\n"),
+        naming_client=client,
+        naming_model="m",
+        naming_constraints="Never use single letters.",
+    )
+
+    system_message = client.calls[0]["messages"][0]["content"]
+    assert "Never use single letters." in system_message

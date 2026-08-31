@@ -83,4 +83,18 @@ def test_run_generate_dedups_against_existing_library(settings, fake_router):
     _block, decision, path = generate_module.run_generate("a sheriff outpost", settings=settings)
 
     assert decision.action == "save_variant"
-    assert path.name == "sheriff_outpost [variant].md"
+    assert path.name == "sheriff_outpost_mut_variant.md"
+
+
+def test_run_generate_includes_constraints_file_in_the_system_prompt(settings, fake_router, tmp_path):
+    constraints_file = tmp_path / "GENERATE_CONSTRAINTS.md"
+    constraints_file.write_text("Don't invent specific dates.", encoding="utf-8")
+    settings.constraints.generate = str(constraints_file)
+
+    client = FakeLLMClient(replies=["## Thing\n\nBody.\n\n**Author:** someone\n"])
+    fake_router(generate_module, client)
+
+    generate_module.run_generate("a thing", settings=settings)
+
+    system_message = client.calls[0]["messages"][0]["content"]
+    assert "Don't invent specific dates." in system_message
