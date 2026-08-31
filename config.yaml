@@ -1,6 +1,7 @@
 blocks_dir: output/blocks
 results_dir: output/results
 templates_path: templates.yaml
+sample_blocks_dir: input_prompts/sample_entries
 
 provider:
   default: openrouter
@@ -26,7 +27,13 @@ google:
   token_path: credentials/token.json
 
 constraints:
-  generate: prompt_constraints/GENERATE_CONSTRAINTS.md
-  naming: prompt_constraints/NAMING_CONSTRAINTS.md
-  mutate: prompt_constraints/MUTATE_CONSTRAINTS.md
-  compose: prompt_constraints/COMPOSE_CONSTRAINTS.md
+  generate: input_prompts/constraints/GENERATE_CONSTRAINTS.md
+  naming: input_prompts/constraints/NAMING_CONSTRAINTS.md
+  mutate: input_prompts/constraints/MUTATE_CONSTRAINTS.md
+  compose: input_prompts/constraints/COMPOSE_CONSTRAINTS.md
+
+compose:
+  keyword_search_min_blocks: 5
+  keyword_search_top_n: 12
+  keywords_per_category_min: 0
+  keywords_per_category_max: 4

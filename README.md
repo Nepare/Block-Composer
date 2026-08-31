@@ -129,11 +129,13 @@ default for that one call, e.g. `--model openrouter:z-ai/glm-5.3` or
 - `models.*` — which `provider:model-id` handles each task (`generate`, `mutate`,
   `compose`, `naming`). Mix and match freely — e.g. push the expensive planning work to a
   strong hosted model while keeping cheap tasks fully local and free.
-- `constraints.*` — paths to the `prompt_constraints/*.md` files (see below).
+- `sample_blocks_dir` — default `input_prompts/sample_entries`, the fallback style
+  examples `generate` learns from when the block library is still empty.
+- `constraints.*` — paths to the `input_prompts/constraints/*.md` files (see below).
 
 The only secret, `OPENROUTER_API_KEY`, lives in a gitignored `.env`, never in `config.yaml`.
 
-## `prompt_constraints/`
+## `input_prompts/constraints/`
 
 Four files — `GENERATE_CONSTRAINTS.md`, `NAMING_CONSTRAINTS.md`, `MUTATE_CONSTRAINTS.md`,
 `COMPOSE_CONSTRAINTS.md` — work like `CLAUDE.md`/`AGENTS.md`: whatever you write in one is
