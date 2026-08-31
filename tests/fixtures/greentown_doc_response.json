@@ -1,0 +1,458 @@
+{
+  "title": "Greentown",
+  "body": {
+    "content": [
+      {
+        "paragraph": {
+          "paragraph": {
+            "elements": [
+              {
+                "textRun": {
+                  "content": "Greentown"
+                }
+              }
+            ],
+            "paragraphStyle": {
+              "namedStyleType": "NORMAL_TEXT"
+            }
+          }
+        }
+      },
+      {
+        "table": {
+          "tableRows": [
+            {
+              "tableCells": [
+                {
+                  "content": [
+                    {
+                      "paragraph": {
+                        "elements": [
+                          {
+                            "textRun": {
+                              "content": "Projects"
+                            }
+                          }
+                        ],
+                        "paragraphStyle": {
+                          "namedStyleType": "NORMAL_TEXT"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "content": [
+                    {
+                      "paragraph": {
+                        "elements": [
+                          {
+                            "textRun": {
+                              "content": ""
+                            }
+                          }
+                        ],
+                        "paragraphStyle": {
+                          "namedStyleType": "NORMAL_TEXT"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "tableCells": [
+                {
+                  "content": [
+                    {
+                      "paragraph": {
+                        "elements": [
+                          {
+                            "textRun": {
+                              "content": "Police Station"
+                            }
+                          }
+                        ],
+                        "paragraphStyle": {
+                          "namedStyleType": "NORMAL_TEXT"
+                        }
+                      }
+                    },
+                    {
+                      "paragraph": {
+                        "elements": [
+                          {
+                            "textRun": {
+                              "content": "This is a police station."
+                            }
+                          }
+                        ],
+                        "paragraphStyle": {
+                          "namedStyleType": "NORMAL_TEXT"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "content": [
+                    {
+                      "paragraph": {
+                        "elements": [
+                          {
+                            "textRun": {
+                              "content": "Author"
+                            }
+                          }
+                        ],
+                        "paragraphStyle": {
+                          "namedStyleType": "HEADING_2"
+                        }
+                      }
+                    },
+                    {
+                      "paragraph": {
+                        "elements": [
+                          {
+                            "textRun": {
+                              "content": "Royal engineering company"
+                            }
+                          }
+                        ],
+                        "paragraphStyle": {
+                          "namedStyleType": "NORMAL_TEXT"
+                        }
+                      }
+                    },
+                    {
+                      "paragraph": {
+                        "elements": [
+                          {
+                            "textRun": {
+                              "content": "Period"
+                            }
+                          }
+                        ],
+                        "paragraphStyle": {
+                          "namedStyleType": "HEADING_2"
+                        }
+                      }
+                    },
+                    {
+                      "paragraph": {
+                        "elements": [
+                          {
+                            "textRun": {
+                              "content": "07.2022 - till now"
+                            }
+                          }
+                        ],
+                        "paragraphStyle": {
+                          "namedStyleType": "NORMAL_TEXT"
+                        }
+                      }
+                    },
+                    {
+                      "paragraph": {
+                        "elements": [
+                          {
+                            "textRun": {
+                              "content": "Rooms"
+                            }
+                          }
+                        ],
+                        "paragraphStyle": {
+                          "namedStyleType": "HEADING_2"
+                        }
+                      }
+                    },
+                    {
+                      "paragraph": {
+                        "elements": [
+                          {
+                            "textRun": {
+                              "content": "Office"
+                            }
+                          }
+                        ],
+                        "paragraphStyle": {
+                          "namedStyleType": "NORMAL_TEXT"
+                        },
+                        "bullet": {
+                          "listId": "l1"
+                        }
+                      }
+                    },
+                    {
+                      "paragraph": {
+                        "elements": [
+                          {
+                            "textRun": {
+                              "content": "Jail"
+                            }
+                          }
+                        ],
+                        "paragraphStyle": {
+                          "namedStyleType": "NORMAL_TEXT"
+                        },
+                        "bullet": {
+                          "listId": "l1"
+                        }
+                      }
+                    },
+                    {
+                      "paragraph": {
+                        "elements": [
+                          {
+                            "textRun": {
+                              "content": "Treasury"
+                            }
+                          }
+                        ],
+                        "paragraphStyle": {
+                          "namedStyleType": "NORMAL_TEXT"
+                        },
+                        "bullet": {
+                          "listId": "l1"
+                        }
+                      }
+                    },
+                    {
+                      "table": {
+                        "tableRows": [
+                          {
+                            "tableCells": [
+                              {
+                                "content": [
+                                  {
+                                    "paragraph": {
+                                      "elements": [
+                                        {
+                                          "textRun": {
+                                            "content": "Environment"
+                                          }
+                                        }
+                                      ],
+                                      "paragraphStyle": {
+                                        "namedStyleType": "HEADING_2"
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "paragraph": {
+                                      "elements": [
+                                        {
+                                          "textRun": {
+                                            "content": "5 wood, 2 iron, 10 gold."
+                                          }
+                                        }
+                                      ],
+                                      "paragraphStyle": {
+                                        "namedStyleType": "NORMAL_TEXT"
+                                      }
+                                    }
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "tableCells": [
+                {
+                  "content": [
+                    {
+                      "paragraph": {
+                        "elements": [
+                          {
+                            "textRun": {
+                              "content": "Lumber"
+                            }
+                          }
+                        ],
+                        "paragraphStyle": {
+                          "namedStyleType": "NORMAL_TEXT"
+                        }
+                      }
+                    },
+                    {
+                      "paragraph": {
+                        "elements": [
+                          {
+                            "textRun": {
+                              "content": "This is a lumber."
+                            }
+                          }
+                        ],
+                        "paragraphStyle": {
+                          "namedStyleType": "NORMAL_TEXT"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "content": [
+                    {
+                      "paragraph": {
+                        "elements": [
+                          {
+                            "textRun": {
+                              "content": "Author"
+                            }
+                          }
+                        ],
+                        "paragraphStyle": {
+                          "namedStyleType": "HEADING_2"
+                        }
+                      }
+                    },
+                    {
+                      "paragraph": {
+                        "elements": [
+                          {
+                            "textRun": {
+                              "content": "Uncle Jack"
+                            }
+                          }
+                        ],
+                        "paragraphStyle": {
+                          "namedStyleType": "NORMAL_TEXT"
+                        }
+                      }
+                    },
+                    {
+                      "paragraph": {
+                        "elements": [
+                          {
+                            "textRun": {
+                              "content": "Period"
+                            }
+                          }
+                        ],
+                        "paragraphStyle": {
+                          "namedStyleType": "HEADING_2"
+                        }
+                      }
+                    },
+                    {
+                      "paragraph": {
+                        "elements": [
+                          {
+                            "textRun": {
+                              "content": "07.2019 - 06.2022"
+                            }
+                          }
+                        ],
+                        "paragraphStyle": {
+                          "namedStyleType": "NORMAL_TEXT"
+                        }
+                      }
+                    },
+                    {
+                      "paragraph": {
+                        "elements": [
+                          {
+                            "textRun": {
+                              "content": "Rooms"
+                            }
+                          }
+                        ],
+                        "paragraphStyle": {
+                          "namedStyleType": "HEADING_2"
+                        }
+                      }
+                    },
+                    {
+                      "paragraph": {
+                        "elements": [
+                          {
+                            "textRun": {
+                              "content": "Room with saw"
+                            }
+                          }
+                        ],
+                        "paragraphStyle": {
+                          "namedStyleType": "NORMAL_TEXT"
+                        },
+                        "bullet": {
+                          "listId": "l1"
+                        }
+                      }
+                    },
+                    {
+                      "paragraph": {
+                        "elements": [
+                          {
+                            "textRun": {
+                              "content": "Room where uncle Jack sleeps"
+                            }
+                          }
+                        ],
+                        "paragraphStyle": {
+                          "namedStyleType": "NORMAL_TEXT"
+                        },
+                        "bullet": {
+                          "listId": "l1"
+                        }
+                      }
+                    },
+                    {
+                      "table": {
+                        "tableRows": [
+                          {
+                            "tableCells": [
+                              {
+                                "content": [
+                                  {
+                                    "paragraph": {
+                                      "elements": [
+                                        {
+                                          "textRun": {
+                                            "content": "Environment"
+                                          }
+                                        }
+                                      ],
+                                      "paragraphStyle": {
+                                        "namedStyleType": "HEADING_2"
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "paragraph": {
+                                      "elements": [
+                                        {
+                                          "textRun": {
+                                            "content": "10 wood, 3 wool, 2 iron."
+                                          }
+                                        }
+                                      ],
+                                      "paragraphStyle": {
+                                        "namedStyleType": "NORMAL_TEXT"
+                                      }
+                                    }
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
