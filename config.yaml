@@ -1,0 +1,26 @@
+blocks_dir: output/blocks
+results_dir: output/results
+templates_path: templates.yaml
+
+provider:
+  default: openrouter
+
+openrouter:
+  base_url: https://openrouter.ai/api/v1
+  api_key_env: OPENROUTER_API_KEY
+
+ollama:
+  base_url: http://localhost:11434
+
+models:
+  generate: openrouter:openrouter/free
+  mutate: openrouter:openrouter/free
+  compose: openrouter:openrouter/free
+  naming: openrouter:openrouter/free
+  local_default: ollama:qwen3-coder-next
+
+google:
+  scopes:
+    - https://www.googleapis.com/auth/documents.readonly
+  credentials_path: credentials/credentials.json
+  token_path: credentials/token.json

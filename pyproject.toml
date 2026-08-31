@@ -1,0 +1,49 @@
+[project]
+name = "cvdocs"
+version = "0.1.0"
+description = "Configurable block library and composer"
+requires-python = ">=3.11"
+dependencies = [
+    "google-api-python-client",
+    "google-auth-httplib2",
+    "google-auth-oauthlib",
+    "typer[all]",
+    "rich",
+    "openai",
+    "python-frontmatter",
+    "pydantic-settings",
+    "python-dotenv",
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-mock", "ruff"]
+
+[project.scripts]
+cvdocs = "cli:app"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = [
+    "cli",
+    "config",
+    "auth",
+    "docs_api",
+    "templates",
+    "blocks",
+    "naming",
+    "dissect",
+    "generate",
+    "mutate",
+    "compose",
+    "errors",
+]
+packages = ["parsing", "llm", "llm.providers"]
+
+[tool.ruff]
+line-length = 100
+src = ["src"]

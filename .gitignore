@@ -1,0 +1,19 @@
+# Secrets
+.env
+credentials/*.json
+
+# Local data — generated
+output/blocks/*.md
+output/results/*.md
+output/results/*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/

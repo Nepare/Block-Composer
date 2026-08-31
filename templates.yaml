@@ -1,0 +1,34 @@
+# Declares the shape of a "block" inside a source Google Doc, so dissection can extract
+# blocks deterministically (no LLM calls) instead of guessing at document structure.
+#
+# Verified against a real source doc ("Greentown"): each block is one row of a shared,
+# 2-column table. Row 1 of that table is a marker row (its left cell names the section,
+# e.g. "Projects"; its right cell is empty) and is skipped — every row after it is a block.
+#
+#   left cell ("primary")  -> first paragraph = name, remaining paragraph(s) = description
+#   right cell ("details")  -> a run of fields, each started by a Heading-styled paragraph
+#                               used as the field's label, followed by its value (a plain
+#                               paragraph, a bulleted list, or a nested single-cell table —
+#                               all three are legal; a nested table's content is scanned
+#                               transparently, as if inlined, since some Docs add-ons write
+#                               a field's value one table deeper than the rest)
+#
+# Field names are auto-slugified from their heading label (e.g. "Author" -> author) unless
+# renamed under known_fields. A field's render shape (a labeled line vs. a bullet list) is
+# auto-detected from its actual content, not declared here.
+
+block_schema:
+  name: project_entry
+  container: table
+  section_marker: "Projects"
+  table_columns: 2
+  columns:
+    primary:
+      name_from: first_paragraph
+      body_from: remaining_paragraphs
+    details:
+      parse: heading_delimited_fields
+      known_fields:
+        - label: "Period"
+          name: time_period
+  tag_fields: [name]
