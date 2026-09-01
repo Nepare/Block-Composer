@@ -2,6 +2,7 @@ blocks_dir: output/blocks
 results_dir: output/results
 templates_path: templates.yaml
 sample_blocks_dir: input_prompts/sample_entries
+logs_dir: output/logs
 
 provider:
   default: openrouter

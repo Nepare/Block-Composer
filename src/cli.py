@@ -15,6 +15,7 @@ import mutate as mutate_module
 from blocks import BlockStore
 from config import load_settings
 from errors import CvdocsError
+from progress import RichConsoleSink
 from text_input import resolve_text_input
 
 app = typer.Typer(add_completion=False, help="cvdocs — a configurable block library and composer.")
@@ -65,7 +66,11 @@ def dissect(
     settings = _settings()
     try:
         result = dissect_module.run_dissect(
-            doc, settings=settings, blocks_dir=blocks_dir, templates_path=templates_file
+            doc,
+            settings=settings,
+            blocks_dir=blocks_dir,
+            templates_path=templates_file,
+            on_progress=RichConsoleSink(console),
         )
     except CvdocsError as exc:
         _print_error(exc)
@@ -114,7 +119,12 @@ def generate(
     for _ in range(count):
         try:
             _block, decision, path = generate_module.run_generate(
-                criteria_text, settings=settings, schema=schema, style_from=style_blocks, model_spec=model
+                criteria_text,
+                settings=settings,
+                schema=schema,
+                style_from=style_blocks,
+                model_spec=model,
+                on_progress=RichConsoleSink(console),
             )
         except CvdocsError as exc:
             _print_error(exc)
@@ -146,7 +156,12 @@ def mutate(
 
     try:
         _block, path = mutate_module.run_mutate(
-            block_id, criteria_text, settings=settings, model_spec=model, in_place=in_place
+            block_id,
+            criteria_text,
+            settings=settings,
+            model_spec=model,
+            in_place=in_place,
+            on_progress=RichConsoleSink(console),
         )
     except CvdocsError as exc:
         _print_error(exc)
@@ -186,7 +201,7 @@ def compose(
             model_spec=model,
             max_generate=max_generate,
             dry_run=dry_run,
-            on_progress=lambda msg: console.print(f"[dim]{escape(msg)}[/dim]"),
+            on_progress=RichConsoleSink(console),
         )
     except CvdocsError as exc:
         _print_error(exc)

@@ -28,3 +28,13 @@ class LLMError(CvdocsError):
 
 class InputError(CvdocsError):
     """Bad user-supplied input (e.g. conflicting or missing inline/file arguments)."""
+
+
+class OperationCancelled(CvdocsError):
+    """Raised when a caller-supplied cancel_check() reported True mid-operation."""
+
+
+class ConfigError(CvdocsError):
+    """A config value names something that doesn't exist (e.g. an unknown storage
+    backend) — distinct from InputError, which is about malformed CLI/API input rather
+    than a bad config setting."""

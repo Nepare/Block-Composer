@@ -5,6 +5,7 @@ import pytest
 
 from config import Settings
 from errors import LLMError
+from llm.logging_client import LoggingLLMClient
 from llm.providers.ollama import OllamaClient
 from llm.providers.openrouter import OpenRouterClient
 from llm.router import get_client_and_model
@@ -119,3 +120,30 @@ def test_router_rejects_spec_without_provider_prefix():
 def test_router_rejects_unknown_provider():
     with pytest.raises(LLMError):
         get_client_and_model("mystery:model", Settings())
+
+
+@patch("llm.providers.openrouter.OpenAI")
+def test_router_wraps_with_logging_client_when_on_progress_is_given(mock_openai_cls):
+    client, model = get_client_and_model(
+        "openrouter:openrouter/free", Settings(), on_progress=lambda e: None
+    )
+
+    assert isinstance(client, LoggingLLMClient)
+    assert model == "openrouter/free"
+
+
+@patch("llm.providers.openrouter.OpenAI")
+def test_router_does_not_wrap_when_on_progress_is_omitted(mock_openai_cls):
+    client, _model = get_client_and_model("openrouter:openrouter/free", Settings())
+
+    assert not isinstance(client, LoggingLLMClient)
+
+
+@patch("llm.providers.openrouter.OpenAI")
+def test_router_wrapping_does_not_disturb_the_cached_raw_client(mock_openai_cls):
+    plain_client, _ = get_client_and_model("openrouter:openrouter/free", Settings())
+    wrapped_client, _ = get_client_and_model(
+        "openrouter:openrouter/free", Settings(), on_progress=lambda e: None
+    )
+
+    assert wrapped_client._inner is plain_client

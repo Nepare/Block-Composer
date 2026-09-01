@@ -24,8 +24,12 @@ def fake_router(monkeypatch):
     `client`, regardless of which provider:model spec was requested — no network, no key."""
 
     def _patch(module, client):
-        def fake_get_client_and_model(spec, settings):
+        def fake_get_client_and_model(spec, settings, on_progress=None):
             _provider, model = spec.split(":", 1)
+            if on_progress is not None:
+                from llm.logging_client import LoggingLLMClient
+
+                return LoggingLLMClient(client, on_progress), model
             return client, model
 
         monkeypatch.setattr(module, "get_client_and_model", fake_get_client_and_model)

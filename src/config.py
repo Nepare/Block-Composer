@@ -84,6 +84,7 @@ class Settings(BaseModel):
     results_dir: str = "output/results"
     templates_path: str = "templates.yaml"
     sample_blocks_dir: str = "input_prompts/sample_entries"
+    logs_dir: str = "output/logs"
     provider: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: OpenRouterConfig = Field(default_factory=OpenRouterConfig)
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
@@ -111,6 +112,10 @@ class Settings(BaseModel):
     @property
     def sample_blocks_path(self) -> Path:
         return self.resolve(self.sample_blocks_dir)
+
+    @property
+    def logs_path(self) -> Path:
+        return self.resolve(self.logs_dir)
 
 
 def load_settings(config_path: Path | str | None = None) -> Settings:

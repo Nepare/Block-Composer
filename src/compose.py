@@ -9,9 +9,10 @@ import mutate
 import naming
 from blocks import Block, BlockStore
 from config import Settings
-from errors import BlockValidationError, LLMError
+from errors import BlockValidationError, LLMError, OperationCancelled
 from llm.prompts import compose_prompt, result_name_prompt
 from llm.router import get_client_and_model
+from progress import ProgressEvent, ProgressSink
 from retrieval import extract_retrieval_signals, rank_blocks
 
 
@@ -34,7 +35,7 @@ def _select_candidate_blocks(
     store: BlockStore,
     exclude_ids: set[str],
     settings: Settings,
-    progress: Callable[[str], None],
+    progress: ProgressSink,
 ) -> list[Block]:
     """Below settings.compose.keyword_search_min_blocks, every block goes to the planner
     (today's behavior, zero extra calls). At or above it, extract categorized keywords
@@ -44,9 +45,9 @@ def _select_candidate_blocks(
     if len(blocks) < settings.compose.keyword_search_min_blocks:
         return blocks
 
-    naming_client, naming_model = get_client_and_model(settings.models.naming, settings)
+    naming_client, naming_model = get_client_and_model(settings.models.naming, settings, on_progress=progress)
     compose_constraints = constraints_module.load(settings, "compose")
-    progress("Extracting search keywords from request…")
+    progress(ProgressEvent(kind="keyword_extraction", message="Extracting search keywords from request…"))
     signals = extract_retrieval_signals(
         request,
         naming_client,
@@ -57,22 +58,40 @@ def _select_candidate_blocks(
     )
     keywords = signals.keywords
     if keywords.is_empty():
-        progress("No usable keywords extracted — searching the full library")
+        progress(
+            ProgressEvent(
+                kind="keyword_extraction", message="No usable keywords extracted — searching the full library"
+            )
+        )
         return blocks
 
     progress(
-        f"Keywords — role: {', '.join(keywords.role) or '—'}; "
-        f"environment: {', '.join(keywords.environment) or '—'}; "
-        f"responsibilities: {', '.join(keywords.responsibilities) or '—'}; "
-        f"domain: {', '.join(keywords.domain) or '—'}"
+        ProgressEvent(
+            kind="keyword_extraction",
+            message=(
+                f"Keywords — role: {', '.join(keywords.role) or '—'}; "
+                f"environment: {', '.join(keywords.environment) or '—'}; "
+                f"responsibilities: {', '.join(keywords.responsibilities) or '—'}; "
+                f"domain: {', '.join(keywords.domain) or '—'}"
+            ),
+        )
     )
     top_n = signals.requested_count or settings.compose.keyword_search_top_n
     if signals.requested_count:
-        progress(f"Request specifies {signals.requested_count} project(s) — narrowing to top {top_n}")
+        progress(
+            ProgressEvent(
+                kind="narrowing",
+                message=f"Request specifies {signals.requested_count} project(s) — narrowing to top {top_n}",
+            )
+        )
     narrowed = rank_blocks(
         blocks, keywords, top_n=top_n, unmatched_reserve=settings.compose.keyword_search_unmatched_reserve
     )
-    progress(f"Narrowed to {len(narrowed)} of {len(blocks)} block(s) in the library")
+    progress(
+        ProgressEvent(
+            kind="narrowing", message=f"Narrowed to {len(narrowed)} of {len(blocks)} block(s) in the library"
+        )
+    )
     return narrowed
 
 
@@ -94,9 +113,9 @@ def _plan_with_llm(
     pinned_ids: set[str],
     settings: Settings,
     model_spec: str | None,
-    progress: Callable[[str], None],
+    progress: ProgressSink,
 ) -> list[ComposeSlot]:
-    client, model = get_client_and_model(model_spec or settings.models.compose, settings)
+    client, model = get_client_and_model(model_spec or settings.models.compose, settings, on_progress=progress)
     candidate_blocks = _select_candidate_blocks(request, store, pinned_ids, settings, progress)
     catalog = _catalog(candidate_blocks)
     pinned_note = (
@@ -106,13 +125,13 @@ def _plan_with_llm(
     )
     compose_constraints = constraints_module.load(settings, "compose")
     messages = compose_prompt(request, catalog, pinned_note, compose_constraints)
-    progress(f"Planning against {len(catalog)} block(s) in the library…")
+    progress(ProgressEvent(kind="plan_start", message=f"Planning against {len(catalog)} block(s) in the library…"))
     reply = client.chat(messages, model, temperature=0.3, max_tokens=1200)
     try:
         steps = _parse_plan_reply(reply)
     except LLMError:
         # one retry -- openrouter/free can route to a different, better-behaved model
-        progress("Planner reply wasn't valid — retrying once…")
+        progress(ProgressEvent(kind="plan_retry", message="Planner reply wasn't valid — retrying once…"))
         retry_messages = messages + [
             {"role": "assistant", "content": reply},
             {
@@ -147,14 +166,21 @@ def run_compose(
     model_spec: str | None = None,
     max_generate: int = 8,
     dry_run: bool = False,
-    on_progress: Callable[[str], None] | None = None,
+    on_progress: ProgressSink | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> tuple[list[ComposeSlot], Path | None]:
-    """`on_progress`, if given, is called with a short status line at each meaningful step
+    """`on_progress`, if given, is called with a ProgressEvent at each meaningful step
     (plan built, before/after each mutate or generate) — compose can otherwise run for
     minutes with zero output, since it's a chain of several sequential LLM calls. Kept as
     a plain callback rather than importing Rich here, so this stays usable as a library and
-    testable without a console."""
-    progress = on_progress or (lambda _msg: None)
+    testable without a console.
+
+    `cancel_check`, if given, is polled between slots during execution — if it returns
+    True, compose stops before starting the next slot and returns the slots completed so
+    far with no final result saved. Blocks/mutations already produced by earlier slots
+    stay saved (each slot persists independently as it completes) — only the combined
+    result is skipped."""
+    progress = on_progress or (lambda _event: None)
     store = BlockStore(settings.blocks_path)
     use_ids = use_ids or []
     generate_criteria = generate_criteria or []
@@ -195,8 +221,13 @@ def run_compose(
     mutate_calls = sum(1 for s in all_slots if s.action == "mutate")
     use_calls = len(all_slots) - generate_calls - mutate_calls
     progress(
-        f"Plan built: {len(all_slots)} step(s) — {use_calls} use, {mutate_calls} mutate, "
-        f"{generate_calls} generate"
+        ProgressEvent(
+            kind="plan_done",
+            message=(
+                f"Plan built: {len(all_slots)} step(s) — {use_calls} use, {mutate_calls} mutate, "
+                f"{generate_calls} generate"
+            ),
+        )
     )
 
     if dry_run:
@@ -207,30 +238,91 @@ def run_compose(
 
     total = len(all_slots)
     for i, slot in enumerate(sorted(all_slots, key=lambda s: s.order), start=1):
+        if cancel_check and cancel_check():
+            progress(
+                ProgressEvent(
+                    kind="cancelled",
+                    message=f"Cancelled after {i - 1}/{total} step(s) — earlier results kept.",
+                    step=i - 1,
+                    total=total,
+                )
+            )
+            return sorted(all_slots, key=lambda s: s.order), None
+
         if slot.action in ("use", "pinned_use"):
             slot.resolved_id = slot.block_id
-            progress(f"[{i}/{total}] use -> {slot.block_id}")
+            progress(ProgressEvent(kind="use", message=f"[{i}/{total}] use -> {slot.block_id}", step=i, total=total))
         elif slot.action == "mutate":
-            progress(f"[{i}/{total}] mutating {slot.block_id}…")
-            _block, path = mutate.run_mutate(slot.block_id, slot.criteria or "", settings=settings)
+            progress(
+                ProgressEvent(
+                    kind="mutate_start", message=f"[{i}/{total}] mutating {slot.block_id}…", step=i, total=total
+                )
+            )
+            try:
+                _block, path = mutate.run_mutate(
+                    slot.block_id,
+                    slot.criteria or "",
+                    settings=settings,
+                    on_progress=progress,
+                    cancel_check=cancel_check,
+                )
+            except OperationCancelled:
+                progress(
+                    ProgressEvent(
+                        kind="cancelled",
+                        message=f"Cancelled during step {i}/{total} — earlier results kept.",
+                        step=i - 1,
+                        total=total,
+                    )
+                )
+                return sorted(all_slots, key=lambda s: s.order), None
             slot.resolved_id = path.stem
-            progress(f"[{i}/{total}] mutated -> {slot.resolved_id}")
+            progress(
+                ProgressEvent(
+                    kind="mutate_done", message=f"[{i}/{total}] mutated -> {slot.resolved_id}", step=i, total=total
+                )
+            )
         elif slot.action in ("generate", "pinned_generate"):
-            progress(f"[{i}/{total}] generating new block…")
-            _block, decision, path = generate.run_generate(slot.criteria or "", settings=settings)
+            progress(
+                ProgressEvent(kind="generate_start", message=f"[{i}/{total}] generating new block…", step=i, total=total)
+            )
+            try:
+                _block, decision, path = generate.run_generate(
+                    slot.criteria or "",
+                    settings=settings,
+                    on_progress=progress,
+                    cancel_check=cancel_check,
+                )
+            except OperationCancelled:
+                progress(
+                    ProgressEvent(
+                        kind="cancelled",
+                        message=f"Cancelled during step {i}/{total} — earlier results kept.",
+                        step=i - 1,
+                        total=total,
+                    )
+                )
+                return sorted(all_slots, key=lambda s: s.order), None
             slot.resolved_id = path.stem if path else decision.duplicate_of
-            progress(f"[{i}/{total}] generated -> {slot.resolved_id}")
+            progress(
+                ProgressEvent(
+                    kind="generate_done",
+                    message=f"[{i}/{total}] generated -> {slot.resolved_id}",
+                    step=i,
+                    total=total,
+                )
+            )
 
     ordered = sorted(all_slots, key=lambda s: s.order)
     bodies = [store.load(s.resolved_id).body.strip() for s in ordered if s.resolved_id]
     content = "\n\n---\n\n".join(bodies)
 
-    progress("Naming result…")
-    result_path = _save_result(content, settings, out_path)
+    progress(ProgressEvent(kind="naming", message="Naming result…"))
+    result_path = _save_result(content, settings, out_path, progress)
     return ordered, result_path
 
 
-def _generate_result_name(content: str, settings: Settings) -> str:
+def _generate_result_name(content: str, settings: Settings, progress: ProgressSink) -> str:
     """A short, descriptive name for the composed result, synthesized from the *whole*
     composed content — not derived from the raw request text (long, conversational, a
     poor filename) and not routed to the cheap naming model: unlike naming's usual job
@@ -239,7 +331,7 @@ def _generate_result_name(content: str, settings: Settings) -> str:
     just echoing one source block's own heading back). Uses the same tier as compose's
     planning call. E.g. "mining_town", "vulkan_plugin_specialist", not a slug of the NL
     request or a copy of one ingredient block's name."""
-    client, model = get_client_and_model(settings.models.compose, settings)
+    client, model = get_client_and_model(settings.models.compose, settings, on_progress=progress)
     compose_constraints = constraints_module.load(settings, "compose")
     reply = client.chat(result_name_prompt(content, compose_constraints), model, temperature=0.2, max_tokens=20)
     lines = [line.strip() for line in reply.strip().splitlines() if line.strip()]
@@ -249,7 +341,7 @@ def _generate_result_name(content: str, settings: Settings) -> str:
     return name
 
 
-def _save_result(content: str, settings: Settings, out_path: Path | None) -> Path:
+def _save_result(content: str, settings: Settings, out_path: Path | None, progress: ProgressSink) -> Path:
     """Goes through the same naming.decide() flow as blocks: brand-new name -> saved
     plainly; a same-slug result already exists -> exact-match reuse or a _mut_ variant."""
     if out_path:
@@ -260,7 +352,7 @@ def _save_result(content: str, settings: Settings, out_path: Path | None) -> Pat
     results_dir = settings.results_path
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    title = _generate_result_name(content, settings)
+    title = _generate_result_name(content, settings, progress)
     base_slug = naming.slugify(title)[:60].rstrip("_") or "result"
     candidate = naming.Candidate(name=title, full_text=content)
 
@@ -270,7 +362,7 @@ def _save_result(content: str, settings: Settings, out_path: Path | None) -> Pat
         if p.stem == base_slug or p.stem.startswith(f"{base_slug}_mut_")
     ]
 
-    naming_client, naming_model = get_client_and_model(settings.models.naming, settings)
+    naming_client, naming_model = get_client_and_model(settings.models.naming, settings, on_progress=progress)
     naming_constraints = constraints_module.load(settings, "naming")
     decision = naming.decide(
         candidate,

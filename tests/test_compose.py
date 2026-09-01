@@ -8,6 +8,7 @@ import mutate as mutate_module
 from blocks import Block, BlockStore
 from errors import BlockNotFoundError, BlockValidationError
 from fakes import FakeLLMClient
+from progress import ProgressEvent
 
 
 def _seed_library(settings):
@@ -247,11 +248,12 @@ def test_on_progress_fires_after_plan_and_around_each_mutate_and_generate(settin
     fake_router(mutate_module, client)
     fake_router(generate_module, client)
 
-    messages: list[str] = []
+    events: list[ProgressEvent] = []
     compose_module.run_compose(
-        "need law enforcement and lumber", settings=settings, on_progress=messages.append
+        "need law enforcement and lumber", settings=settings, on_progress=events.append
     )
 
+    messages = [e.message for e in events]
     joined = "\n".join(messages)
     assert "Plan built: 2 step(s)" in joined
     assert any("mutating police_station" in m for m in messages)
@@ -259,6 +261,14 @@ def test_on_progress_fires_after_plan_and_around_each_mutate_and_generate(settin
     assert any("generating new block" in m for m in messages)
     assert any(m.startswith("[2/2] generated ->") for m in messages)
     assert "Naming result…" in messages
+    # compose's own bracketed slot narrative and the callees' internal narrative
+    # (mutate_start/generate_start fired from inside run_mutate/run_generate) coexist
+    assert any(e.kind == "mutate_start" and e.block_id == "police_station" for e in events)
+    assert any(e.kind == "generate_start" for e in events)
+    # every LLM call along the way emits its own diagnostic pair, invisible to RichConsoleSink
+    # but present in the raw event stream for a log sink to persist
+    assert sum(1 for e in events if e.kind == "llm_call_start") == client.call_count
+    assert sum(1 for e in events if e.kind == "llm_call_done") == client.call_count
 
 
 def test_on_progress_is_optional_and_defaults_to_silent(settings, fake_router):
@@ -269,16 +279,65 @@ def test_on_progress_is_optional_and_defaults_to_silent(settings, fake_router):
     compose_module.run_compose("", settings=settings, use_ids=["school"])
 
 
+def test_cancel_check_stops_before_any_slot_executes(settings, fake_router):
+    _seed_library(settings)
+    plan = json.dumps(
+        {"steps": [{"order": 1, "action": "generate", "block_id": None, "criteria": "a hospital"}]}
+    )
+    client = FakeLLMClient(replies=[plan])
+    fake_router(compose_module, client)
+
+    events: list[ProgressEvent] = []
+    slots, result_path = compose_module.run_compose(
+        "need a hospital", settings=settings, on_progress=events.append, cancel_check=lambda: True
+    )
+
+    assert result_path is None
+    assert slots[0].resolved_id is None
+    assert client.call_count == 1  # just the planning call -- the generate slot never runs
+    assert any(e.kind == "cancelled" for e in events)
+
+
+def test_cancel_check_mid_plan_keeps_earlier_slots_resolved(settings, fake_router):
+    _seed_library(settings)
+    plan = json.dumps(
+        {
+            "steps": [
+                {"order": 1, "action": "mutate", "block_id": "police_station", "criteria": "adapt"},
+                {"order": 2, "action": "generate", "block_id": None, "criteria": "a sawmill"},
+            ]
+        }
+    )
+    mutate_reply = "===BODY===\n## Sheriff Station\n\nAdapted.\n\n**Rooms:**\n- Office\n===LABEL===\nsheriff"
+    client = FakeLLMClient(replies=[plan, mutate_reply])
+    fake_router(compose_module, client)
+    fake_router(mutate_module, client)
+
+    calls = {"n": 0}
+
+    def cancel_after_first_slot():
+        calls["n"] += 1
+        return calls["n"] > 1  # False before slot 1, True before slot 2
+
+    slots, result_path = compose_module.run_compose(
+        "need law enforcement and lumber", settings=settings, cancel_check=cancel_after_first_slot
+    )
+
+    assert result_path is None  # cancelled before the combined result could be saved
+    assert slots[0].resolved_id == "sheriff_station"  # slot 1 completed and stays saved
+    assert slots[1].resolved_id is None  # slot 2 never ran
+
+
 def test_below_threshold_library_skips_keyword_extraction(settings, fake_router):
     _seed_library(settings)  # 2 blocks, below the default keyword_search_min_blocks (5)
     plan = json.dumps({"steps": [{"order": 1, "action": "use", "block_id": "school", "criteria": None}]})
     client = FakeLLMClient(replies=[plan, "school_result"])
     fake_router(compose_module, client)
 
-    messages: list[str] = []
-    compose_module.run_compose("need a school", settings=settings, on_progress=messages.append)
+    events: list[ProgressEvent] = []
+    compose_module.run_compose("need a school", settings=settings, on_progress=events.append)
 
-    joined = "\n".join(messages)
+    joined = "\n".join(e.message for e in events)
     assert "Extracting search keywords" not in joined
     assert "Planning against 2 block(s)" in joined
     # just the planning call + the result-naming call -- no extra keyword-extraction call
@@ -292,10 +351,10 @@ def test_at_threshold_library_extracts_keywords_and_narrows_the_catalog(settings
     client = FakeLLMClient(replies=[keywords_reply, plan, "result"])
     fake_router(compose_module, client)
 
-    messages: list[str] = []
-    compose_module.run_compose("need something in Jira", settings=settings, on_progress=messages.append)
+    events: list[ProgressEvent] = []
+    compose_module.run_compose("need something in Jira", settings=settings, on_progress=events.append)
 
-    joined = "\n".join(messages)
+    joined = "\n".join(e.message for e in events)
     assert "Extracting search keywords" in joined
     assert "Narrowed to 5 of 5 block(s)" in joined  # all 5 share the matched keyword
     # keyword-extraction call + planning call + result-naming call
@@ -312,12 +371,12 @@ def test_request_specified_project_count_overrides_the_configured_top_n(settings
     client = FakeLLMClient(replies=[keywords_reply, plan, "result"])
     fake_router(compose_module, client)
 
-    messages: list[str] = []
+    events: list[ProgressEvent] = []
     compose_module.run_compose(
-        "give me 2 projects that use Jira", settings=settings, on_progress=messages.append
+        "give me 2 projects that use Jira", settings=settings, on_progress=events.append
     )
 
-    joined = "\n".join(messages)
+    joined = "\n".join(e.message for e in events)
     assert "Request specifies 2 project(s)" in joined
     assert "Narrowed to 2 of 6 block(s)" in joined
 
@@ -331,12 +390,12 @@ def test_degenerate_project_count_falls_back_to_the_configured_top_n(settings, f
     client = FakeLLMClient(replies=[keywords_reply, plan, "result"])
     fake_router(compose_module, client)
 
-    messages: list[str] = []
+    events: list[ProgressEvent] = []
     compose_module.run_compose(
-        "give me projects that use Jira", settings=settings, on_progress=messages.append
+        "give me projects that use Jira", settings=settings, on_progress=events.append
     )
 
-    joined = "\n".join(messages)
+    joined = "\n".join(e.message for e in events)
     assert "Request specifies" not in joined
     assert "Narrowed to 6 of 6 block(s)" in joined
 
@@ -348,10 +407,10 @@ def test_degenerate_keyword_reply_falls_back_to_the_full_catalog(settings, fake_
     client = FakeLLMClient(replies=[unparseable_keywords_reply, plan, "result"])
     fake_router(compose_module, client)
 
-    messages: list[str] = []
-    compose_module.run_compose("need something", settings=settings, on_progress=messages.append)
+    events: list[ProgressEvent] = []
+    compose_module.run_compose("need something", settings=settings, on_progress=events.append)
 
-    joined = "\n".join(messages)
+    joined = "\n".join(e.message for e in events)
     assert "No usable keywords extracted" in joined
     assert "Planning against 5 block(s)" in joined  # fell back to the full, unnarrowed catalog
 
@@ -376,11 +435,11 @@ def test_dry_run_still_reports_the_plan_built_progress_line(settings, fake_route
     )
     fake_router(compose_module, FakeLLMClient(replies=[plan]))
 
-    messages: list[str] = []
+    events: list[ProgressEvent] = []
     compose_module.run_compose(
-        "need a hospital", settings=settings, dry_run=True, on_progress=messages.append
+        "need a hospital", settings=settings, dry_run=True, on_progress=events.append
     )
 
-    assert any("Plan built: 1 step(s)" in m for m in messages)
+    assert any("Plan built: 1 step(s)" in e.message for e in events)
     # dry-run must not execute the generate step
-    assert not any("generating new block" in m for m in messages)
+    assert not any("generating new block" in e.message for e in events)

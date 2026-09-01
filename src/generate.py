@@ -1,14 +1,16 @@
 from pathlib import Path
+from typing import Callable
 
 import frontmatter
 
 import constraints as constraints_module
 from blocks import Block, BlockStore
 from config import Settings
-from errors import BlockValidationError
+from errors import BlockValidationError, OperationCancelled
 from llm.prompts import generate_prompt
 from llm.router import get_client_and_model
 from naming import NamingDecision
+from progress import ProgressEvent, ProgressSink
 
 
 def validate_block_shape(body: str) -> None:
@@ -48,18 +50,29 @@ def run_generate(
     schema: str = "project_entry",
     style_from: list[Block] | None = None,
     model_spec: str | None = None,
+    on_progress: ProgressSink | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> tuple[Block, NamingDecision, Path | None]:
+    """`on_progress`/`cancel_check` mirror compose.run_compose's — optional, no-op by
+    default, so this stays silent and uncancellable when called directly as before."""
+    progress = on_progress or (lambda _event: None)
     store = BlockStore(settings.blocks_path)
-    client, model = get_client_and_model(model_spec or settings.models.generate, settings)
+    client, model = get_client_and_model(model_spec or settings.models.generate, settings, on_progress=progress)
     examples = _pick_style_examples(schema, style_from, store, settings)
     generate_constraints = constraints_module.load(settings, "generate")
     messages = generate_prompt(criteria, examples, generate_constraints)
 
+    progress(ProgressEvent(kind="generate_start", message=f"Generating a {schema} block…"))
     body = client.chat(messages, model, temperature=0.5, max_tokens=900)
     try:
         validate_block_shape(body)
     except BlockValidationError:
+        if cancel_check and cancel_check():
+            raise OperationCancelled("Cancelled before the generate retry.")
         # one automatic re-prompt, telling the model what was wrong
+        progress(
+            ProgressEvent(kind="generate_retry", message="Reply didn't match required shape — retrying once…")
+        )
         retry_messages = messages + [
             {"role": "assistant", "content": body},
             {
@@ -79,7 +92,8 @@ def run_generate(
         created_by="generated",
         generation_criteria=criteria,
     )
-    naming_client, naming_model = get_client_and_model(settings.models.naming, settings)
+    progress(ProgressEvent(kind="naming", message="Checking for duplicates / naming result…"))
+    naming_client, naming_model = get_client_and_model(settings.models.naming, settings, on_progress=progress)
     naming_constraints = constraints_module.load(settings, "naming")
     decision, path = store.save_with_dedup(
         block,
@@ -87,4 +101,5 @@ def run_generate(
         naming_model=naming_model,
         naming_constraints=naming_constraints,
     )
+    progress(ProgressEvent(kind="generate_done", message=f"Generated -> {path.stem if path else decision.duplicate_of}"))
     return block, decision, path

@@ -5,6 +5,7 @@ import dissect as dissect_module
 import docs_api
 from blocks import BlockStore
 from fakes import FakeLLMClient
+from progress import ProgressEvent
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "greentown_doc_response.json"
 
@@ -47,6 +48,22 @@ def test_run_dissect_second_pass_over_the_same_doc_is_all_duplicates(settings, f
 
     assert result2.saved == []
     assert len(result2.skipped_duplicates) == 2
+
+
+def test_run_dissect_fires_one_progress_event_per_row(settings, fake_router, monkeypatch):
+    document = _load_fixture()
+    monkeypatch.setattr(docs_api, "get_document", lambda doc_id: document)
+    fake_router(dissect_module, FakeLLMClient())
+
+    events: list[ProgressEvent] = []
+    dissect_module.run_dissect(
+        "https://docs.google.com/document/d/FAKEID/edit", settings=settings, on_progress=events.append
+    )
+
+    row_events = [e for e in events if e.kind == "dissect_row"]
+    assert len(row_events) == 2
+    assert row_events[0].step == 1 and row_events[0].total == 2
+    assert row_events[1].step == 2 and row_events[1].total == 2
 
 
 def test_run_dissect_resolves_url_to_doc_id(settings, fake_router, monkeypatch):

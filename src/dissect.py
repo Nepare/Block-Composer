@@ -9,6 +9,7 @@ from config import Settings
 from llm.router import get_client_and_model
 from parsing.structural_walk import find_blocks_table
 from parsing.table_to_block import extract_block, named_style_bold_defaults
+from progress import ProgressEvent, ProgressSink
 
 
 @dataclass
@@ -24,7 +25,11 @@ def run_dissect(
     settings: Settings,
     blocks_dir: Path | None = None,
     templates_path: Path | None = None,
+    on_progress: ProgressSink | None = None,
 ) -> DissectResult:
+    """`on_progress`, if given, fires once per extracted row — optional, no-op by default,
+    so this stays silent when called directly as before."""
+    progress = on_progress or (lambda _event: None)
     doc_id = docs_api.resolve_doc_id(doc_id_or_url)
     document = docs_api.get_document(doc_id)
 
@@ -34,14 +39,15 @@ def run_dissect(
 
     store = BlockStore(blocks_dir or settings.blocks_path)
     # Only used lazily, per-conflict — extraction itself makes zero LLM calls.
-    naming_client, naming_model = get_client_and_model(settings.models.naming, settings)
+    naming_client, naming_model = get_client_and_model(settings.models.naming, settings, on_progress=progress)
     naming_constraints = constraints_module.load(settings, "naming")
 
     saved: list[tuple[Block, Path]] = []
     skipped: list[tuple[str, str]] = []
     variants: list[tuple[Block, Path, str]] = []
 
-    for row in blocks_table.rows:
+    rows = blocks_table.rows
+    for i, row in enumerate(rows, start=1):
         block = extract_block(row, schema, style_defaults)
         block.source = doc_id
         decision, path = store.save_with_dedup(
@@ -56,5 +62,14 @@ def run_dissect(
             variants.append((block, path, decision.label or ""))
         else:
             saved.append((block, path))
+        progress(
+            ProgressEvent(
+                kind="dissect_row",
+                message=f"[{i}/{len(rows)}] {block.name} -> {decision.action}",
+                step=i,
+                total=len(rows),
+                block_id=path.stem if path else decision.duplicate_of,
+            )
+        )
 
     return DissectResult(saved=saved, skipped_duplicates=skipped, variants=variants)

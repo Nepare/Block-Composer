@@ -2,8 +2,9 @@ import pytest
 
 import mutate as mutate_module
 from blocks import Block, BlockStore
-from errors import BlockNotFoundError
+from errors import BlockNotFoundError, OperationCancelled
 from fakes import FakeLLMClient
+from progress import ProgressEvent
 
 
 def _seed(settings, stem="police_station", body="## Police Station\n\nRegular.\n\n**Rooms:**\n- Office\n", tags=None):
@@ -142,6 +143,47 @@ def test_run_mutate_second_variant_gets_a_distinct_filename(settings, fake_route
     _block, path2 = mutate_module.run_mutate("police_station", "sheriff again", settings=settings)
 
     assert path2.name == "police_station_mut_sheriff_2.md"
+
+
+def test_run_mutate_fires_progress_events_around_the_call(settings, fake_router):
+    _seed(settings)
+    reply = (
+        "===BODY===\n## Police Station\n\nSheriff-run now.\n\n**Rooms:**\n- Office\n- Cells\n"
+        "===LABEL===\nsheriff"
+    )
+    client = FakeLLMClient(replies=[reply])
+    fake_router(mutate_module, client)
+
+    events: list[ProgressEvent] = []
+    mutate_module.run_mutate("police_station", "make it sheriff-themed", settings=settings, on_progress=events.append)
+
+    kinds = [e.kind for e in events]
+    assert kinds[0] == "mutate_start"
+    assert kinds[-1] == "mutate_done"
+
+
+def test_run_mutate_is_silent_by_default_with_no_on_progress(settings, fake_router):
+    _seed(settings)
+    reply = "===BODY===\n## Police Station\n\nSheriff-run now.\n\n**Rooms:**\n- Office\n===LABEL===\nsheriff"
+    fake_router(mutate_module, FakeLLMClient(replies=[reply]))
+
+    # must not raise just because no on_progress was given
+    mutate_module.run_mutate("police_station", "re-theme", settings=settings)
+
+
+def test_run_mutate_raises_operation_cancelled_before_the_retry(settings, fake_router):
+    _seed(settings)
+    client = FakeLLMClient(
+        replies=[
+            "not in the required format at all",
+            "===BODY===\n## Police Station\n\nFixed.\n\n**Rooms:**\n- Office\n===LABEL===\nsheriff",
+        ]
+    )
+    fake_router(mutate_module, client)
+
+    with pytest.raises(OperationCancelled):
+        mutate_module.run_mutate("police_station", "fix", settings=settings, cancel_check=lambda: True)
+    assert client.call_count == 1
 
 
 def test_run_mutate_includes_constraints_file_in_the_system_prompt(settings, fake_router, tmp_path):
