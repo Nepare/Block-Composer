@@ -8,6 +8,7 @@ filesystem path to hand back, so the Protocol can't be Path-shaped.
 from pathlib import Path
 
 import frontmatter
+from google.oauth2.credentials import Credentials
 
 import naming
 from blocks import Block
@@ -183,3 +184,23 @@ class FilesystemResultStorage:
             return decision, None
         stem = self.save(result, filename_stem=decision.stem)
         return decision, stem
+
+
+class FilesystemCredentialsStorage:
+    """Wraps the token.json read/write today's src/auth.py did directly — same file,
+    same `Credentials.from_authorized_user_file`/`to_json` round-trip, just behind the
+    CredentialsStorage Protocol so InstalledAppAuthProvider doesn't touch token_path
+    itself."""
+
+    def __init__(self, token_path: Path | str, scopes: list[str]):
+        self.token_path = Path(token_path)
+        self.scopes = scopes
+
+    def save(self, creds: Credentials) -> None:
+        self.token_path.parent.mkdir(parents=True, exist_ok=True)
+        self.token_path.write_text(creds.to_json(), encoding="utf-8")
+
+    def load(self) -> Credentials | None:
+        if not self.token_path.exists():
+            return None
+        return Credentials.from_authorized_user_file(str(self.token_path), self.scopes)

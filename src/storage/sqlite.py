@@ -17,10 +17,14 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+from google.oauth2.credentials import Credentials
+
 import naming
 from blocks import Block
 from errors import BlockNotFoundError
 from storage.base import Result
+
+DEFAULT_USER_ID = "default"
 
 
 def _connect(path: Path | str) -> sqlite3.Connection:
@@ -326,3 +330,70 @@ class SqliteResultStorage:
         self._conn.execute("COMMIT")
         result.id = decision.stem
         return decision, decision.stem
+
+
+class SqliteCredentialsStorage:
+    """Stores a single Google OAuth `Credentials` per `user_id` (reserved for future
+    multi-tenant use; always `DEFAULT_USER_ID` today), backed by a `credentials` table."""
+
+    def __init__(self, path: Path | str):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = _connect(self.path)
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS credentials (
+                user_id TEXT PRIMARY KEY,
+                token TEXT NOT NULL,
+                refresh_token TEXT,
+                client_id TEXT,
+                client_secret TEXT,
+                expiry TEXT,
+                scopes TEXT NOT NULL DEFAULT '[]'
+            )
+            """
+        )
+
+    def save(self, creds: Credentials) -> None:
+        self._conn.execute("BEGIN")
+        try:
+            self._conn.execute(
+                """
+                INSERT INTO credentials (user_id, token, refresh_token, client_id,
+                                          client_secret, expiry, scopes)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    token=excluded.token, refresh_token=excluded.refresh_token,
+                    client_id=excluded.client_id, client_secret=excluded.client_secret,
+                    expiry=excluded.expiry, scopes=excluded.scopes
+                """,
+                (
+                    DEFAULT_USER_ID,
+                    creds.token,
+                    creds.refresh_token,
+                    creds.client_id,
+                    creds.client_secret,
+                    creds.expiry.isoformat() if creds.expiry else None,
+                    json.dumps(list(creds.scopes) if creds.scopes else []),
+                ),
+            )
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
+        self._conn.execute("COMMIT")
+
+    def load(self) -> Credentials | None:
+        row = self._conn.execute(
+            "SELECT * FROM credentials WHERE user_id = ?", (DEFAULT_USER_ID,)
+        ).fetchone()
+        if row is None:
+            return None
+        return Credentials(
+            token=row["token"],
+            refresh_token=row["refresh_token"],
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=row["client_id"],
+            client_secret=row["client_secret"],
+            scopes=json.loads(row["scopes"]),
+            expiry=datetime.fromisoformat(row["expiry"]) if row["expiry"] else None,
+        )

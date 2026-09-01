@@ -12,6 +12,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
+from google.oauth2.credentials import Credentials
+
 from blocks import Block
 from naming import Candidate, NamingDecision
 from progress import ProgressEvent
@@ -68,3 +70,8 @@ class ResultStorage(Protocol):
     def save_with_dedup(
         self, result: Result, *, naming_client, naming_model: str, naming_constraints: str = ""
     ) -> tuple[NamingDecision, str | None]: ...
+
+
+class CredentialsStorage(Protocol):
+    def save(self, creds: Credentials) -> None: ...
+    def load(self) -> Credentials | None: ...

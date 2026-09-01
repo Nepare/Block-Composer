@@ -7,13 +7,13 @@ from rich.markup import escape
 from rich.table import Table
 from rich.tree import Tree
 
-import auth as auth_module
 import compose as compose_module
 import dissect as dissect_module
 import generate as generate_module
 import mutate as mutate_module
+from auth.router import get_auth_provider
 from config import load_settings
-from errors import CvdocsError
+from errors import AuthError, CvdocsError
 from progress import RichConsoleSink
 from storage.router import get_block_storage
 from text_input import resolve_text_input
@@ -40,8 +40,12 @@ def _print_error(exc: Exception) -> None:
 
 @auth_app.command("login")
 def auth_login():
+    provider = get_auth_provider(_settings())
     try:
-        auth_module.login(_settings())
+        provider.login()
+    except AttributeError:
+        _print_error(AuthError("Local sign-in isn't available for this deployment's connection method."))
+        raise typer.Exit(1)
     except CvdocsError as exc:
         _print_error(exc)
         raise typer.Exit(1)
@@ -50,7 +54,14 @@ def auth_login():
 
 @auth_app.command("status")
 def auth_status():
-    valid, scopes = auth_module.status(_settings())
+    provider = get_auth_provider(_settings())
+    try:
+        valid, scopes = provider.status()
+    except AttributeError:
+        console.print(
+            "[yellow]Status isn't available for this deployment's connection method.[/yellow]"
+        )
+        return
     if valid:
         console.print(f"[green]Token valid.[/green] Scopes: {escape(', '.join(scopes)) or '(none recorded)'}")
     else:

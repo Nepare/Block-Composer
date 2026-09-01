@@ -43,6 +43,13 @@ class GoogleConfig(BaseModel):
     )
     credentials_path: str = "credentials/credentials.json"
     token_path: str = "credentials/token.json"
+    # Web-application OAuth client, used by WebAuthProvider (hosted/sqlite-backend mode).
+    # Names of env vars, never the secrets themselves — same pattern as
+    # OpenRouterConfig.api_key_env.
+    web_client_id_env: str = "GOOGLE_WEB_CLIENT_ID"
+    web_client_secret_env: str = "GOOGLE_WEB_CLIENT_SECRET"
+    # Not secret — the deployment's own OAuth callback address.
+    web_redirect_uri: str = "http://localhost:8000/auth/google/callback"
 
 
 class PromptConstraintsConfig(BaseModel):

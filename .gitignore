@@ -10,6 +10,9 @@ output/results/*.json
 # Agent state
 .claude/
 
+# Specify sessions
+specs/
+
 # Python
 __pycache__/
 *.py[cod]
