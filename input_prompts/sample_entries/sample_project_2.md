@@ -10,9 +10,9 @@ created_by: manual
 
 A short, plain description explaining the scope and purpose of this project.
 
-**Author:** Another Contributor
+**Role:** Backend Developer
 
-**Time period:** 2021 – 2022
+**Period:** 2021 – 2022
 
 **Responsibilities:**
 - A responsibility or milestone reached during the project;

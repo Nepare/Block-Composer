@@ -10,9 +10,9 @@ created_by: manual
 
 A detailed but snappy description of what this project was and what it accomplished — five or six sentences, no more.
 
-**Author:** Project Lead
+**Role:** Project Lead
 
-**Time period:** 01.2023 – 06.2023
+**Period:** 01.2023 – 06.2023
 
 **Responsibilities:**
 - A specific task or contribution made during the project;
