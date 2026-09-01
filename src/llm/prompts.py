@@ -85,7 +85,11 @@ COMPOSE_SYSTEM = (
 
 
 def compose_prompt(
-    request: str, catalog: list[dict], pinned_note: str, constraints: str = ""
+    request: str,
+    catalog: list[dict],
+    pinned_note: str,
+    constraints: str = "",
+    required_count: int | None = None,
 ) -> list[dict[str, str]]:
     catalog_text = "\n\n".join(
         f"### {b['id']} (tags: {', '.join(b['tags'])})\n{b['body']}" for b in catalog
@@ -93,6 +97,8 @@ def compose_prompt(
     user = f"Request: {request}\n\nAvailable blocks:\n{catalog_text or '(none)'}"
     if pinned_note:
         user += f"\n\n{pinned_note}"
+    if required_count is not None:
+        user += f"\n\nYour plan's \"steps\" list MUST contain exactly {required_count} entries — no more, no fewer."
     return [
         {"role": "system", "content": _with_constraints(COMPOSE_SYSTEM, constraints)},
         {"role": "user", "content": user},
@@ -121,22 +127,19 @@ def _keyword_extraction_system(min_per_category: int, max_per_category: int) -> 
     )
     return (
         "You turn a natural-language request into search keywords for a personal block "
-        "library, so it can be narrowed down before planning. Reply with ONLY these five "
+        "library, so it can be narrowed down before planning. Reply with ONLY these four "
         "lines, nothing else — no commentary, no code fences. Any line can be left blank "
         "(just the label, nothing after the colon) if that category doesn't apply to the "
         "request:\n\n"
         f"ROLE: <{count_phrase} job title(s) or function(s) implied by the request, "
         "maximum of 5 words per point, comma-separated>\n"
-        f"ENVIRONMENT: <{count_phrase} CONCISE tools, technologies, programming languages, " 
+        f"ENVIRONMENT: <{count_phrase} CONCISE tools, technologies, programming languages, "
         "frameworks, IDEs, standards or resources implied by the request, maximum of 5 words "
         "per point, bracketed subvariants should be separated into distinct points, comma-separated>\n"
         f"RESPONSIBILITIES: <{count_phrase} actions or achievements implied by the "
         "request, maximum of 3 words per point, comma-separated>\n"
         f"DOMAIN: <{count_phrase} industry or subject-area words implied by the request, "
-        "maximum 4 words per point, comma-separated>\n"
-        "PROJECT_COUNT: <if the request explicitly asks for a specific number of "
-        "projects/entries, e.g. \"3 projects\" or \"five examples\", that number; otherwise "
-        "leave blank>\n\n"
+        "maximum 4 words per point, comma-separated>\n\n"
         "Keywords should be plain words or short phrases actually implied by the request, "
         "not invented specifics. Mostly focus on environment, keep each point simple and precise, even "
         "if it is one word; maximize the amount of points if relevant. Do not explain your choices."
@@ -153,5 +156,20 @@ def keyword_extraction_prompt(
     system = _keyword_extraction_system(min_per_category, max_per_category)
     return [
         {"role": "system", "content": _with_constraints(system, constraints)},
+        {"role": "user", "content": f"Request: {request}"},
+    ]
+
+
+TARGET_COUNT_SYSTEM = (
+    "You read a request for a composed document and determine whether it explicitly states "
+    "a specific number of projects/entries it should contain (e.g. \"3 projects\" or \"five "
+    "examples\"). Reply with ONLY that number as a digit if it does, or the single word NONE "
+    "if it does not. No other text, no explanation."
+)
+
+
+def target_count_prompt(request: str, constraints: str = "") -> list[dict[str, str]]:
+    return [
+        {"role": "system", "content": _with_constraints(TARGET_COUNT_SYSTEM, constraints)},
         {"role": "user", "content": f"Request: {request}"},
     ]

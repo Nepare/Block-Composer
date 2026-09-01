@@ -67,3 +67,33 @@ def test_compose_request_file_is_read_and_passed_through(tmp_path, cli_settings,
 
     assert result.exit_code == 0
     assert captured["request"] == "aim for 2 backend projects"
+
+
+def test_compose_count_is_passed_through(tmp_path, cli_settings, monkeypatch):
+    captured = {}
+
+    def fake_run_compose(request, **kwargs):
+        captured["count"] = kwargs.get("count")
+        return [], None
+
+    monkeypatch.setattr(cli.compose_module, "run_compose", fake_run_compose)
+
+    result = runner.invoke(cli.app, ["compose", "some request", "--count", "5", "--dry-run"])
+
+    assert result.exit_code == 0
+    assert captured["count"] == 5
+
+
+def test_compose_count_defaults_to_none(tmp_path, cli_settings, monkeypatch):
+    captured = {}
+
+    def fake_run_compose(request, **kwargs):
+        captured["count"] = kwargs.get("count")
+        return [], None
+
+    monkeypatch.setattr(cli.compose_module, "run_compose", fake_run_compose)
+
+    result = runner.invoke(cli.app, ["compose", "some request", "--dry-run"])
+
+    assert result.exit_code == 0
+    assert captured["count"] is None

@@ -7,10 +7,11 @@ Keeps compose's planning prompt from having to include the whole library every t
 
 import re
 from dataclasses import dataclass, field
+from typing import Callable
 
 from blocks import Block
 from llm.client import LLMClient
-from llm.prompts import keyword_extraction_prompt
+from llm.prompts import keyword_extraction_prompt, target_count_prompt
 
 _CATEGORY_LABELS = {
     "role": "ROLE",
@@ -56,14 +57,10 @@ class CategorizedKeywords:
 @dataclass(frozen=True)
 class RetrievalSignals:
     keywords: CategorizedKeywords = field(default_factory=CategorizedKeywords)
-    # e.g. "aim for 3 projects" -> 3; None if the request didn't specify a count, in which
-    # case the caller falls back to its own configured default top_n
-    requested_count: int | None = None
 
 
 def _parse_signals_reply(reply: str, max_per_category: int) -> RetrievalSignals:
     values: dict[str, list[str]] = {cat: [] for cat in _CATEGORY_LABELS}
-    requested_count: int | None = None
     for line in reply.splitlines():
         line = line.strip()
         if not line or ":" not in line:
@@ -71,17 +68,13 @@ def _parse_signals_reply(reply: str, max_per_category: int) -> RetrievalSignals:
         label, _, rest = line.partition(":")
         label = label.strip().upper()
         rest = rest.strip()
-        if label == "PROJECT_COUNT":
-            if rest.isdigit() and int(rest) > 0:
-                requested_count = int(rest)
-            continue
         for category, wanted_label in _CATEGORY_LABELS.items():
             if label == wanted_label:
                 tokens = [t.strip() for t in rest.split(",") if t.strip()]
                 # enforced regardless of what the model actually returned -- the prompt's
                 # count is a request, not a guarantee
                 values[category] = tokens[:max_per_category] if max_per_category >= 0 else tokens
-    return RetrievalSignals(keywords=CategorizedKeywords(**values), requested_count=requested_count)
+    return RetrievalSignals(keywords=CategorizedKeywords(**values))
 
 
 def extract_retrieval_signals(
@@ -105,9 +98,27 @@ def extract_retrieval_signals(
     except Exception:
         return RetrievalSignals()
     signals = _parse_signals_reply(reply, max_per_category)
-    if signals.requested_count is not None and not _request_mentions_count(request, signals.requested_count):
-        signals = RetrievalSignals(keywords=signals.keywords, requested_count=None)
     return signals
+
+
+def extract_target_count(
+    request: str, client: LLMClient, model: str, constraints: str = ""
+) -> int | None:
+    """Pure function like extract_retrieval_signals -- parses target_count_prompt's
+    digit-or-NONE reply, then applies the same _request_mentions_count backstop before
+    trusting it. Never raises."""
+    prompt = target_count_prompt(request, constraints)
+    try:
+        reply = client.chat(prompt, model, temperature=0.0, max_tokens=10)
+    except Exception:
+        return None
+    text = reply.strip()
+    if not text.isdigit() or int(text) <= 0:
+        return None
+    count = int(text)
+    if not _request_mentions_count(request, count):
+        return None
+    return count
 
 
 @dataclass(frozen=True)
@@ -132,7 +143,9 @@ def _category_text(fields, category: str) -> str:
     return ""
 
 
-def score_block(block: Block, keywords: CategorizedKeywords) -> ScoredBlock:
+def score_block(
+    block: Block, keywords: CategorizedKeywords, *, keyword_weight: Callable[[str, str], float] | None = None
+) -> ScoredBlock:
     fields = block.fields
     domain_text = f"{_category_text(fields, 'domain')} {' '.join(block.tags)}".lower()
     category_text = {
@@ -153,20 +166,26 @@ def score_block(block: Block, keywords: CategorizedKeywords) -> ScoredBlock:
         hits = [kw for kw in keyword_list if kw.lower() in category_text[category]]
         if hits:
             matched[category] = hits
-            score += _WEIGHTS[category] * len(hits)
+            weight_fn = keyword_weight or (lambda _category, _kw: 1.0)
+            score += _WEIGHTS[category] * sum(weight_fn(category, kw) for kw in hits)
 
     return ScoredBlock(block=block, score=score, matched=matched)
 
 
 def rank_blocks(
-    blocks: list[Block], keywords: CategorizedKeywords, *, top_n: int, unmatched_reserve: int = 2
+    blocks: list[Block],
+    keywords: CategorizedKeywords,
+    *,
+    top_n: int,
+    unmatched_reserve: int = 2,
+    keyword_weight: Callable[[str, str], float] | None = None,
 ) -> list[Block]:
     """Top-scoring blocks first, plus a small deterministic sample of zero-scoring blocks
     (up to unmatched_reserve, sorted by id) so a block that shares no keywords isn't
     invisible to the planner as a possible mutate/generate gap-filler. Fixed rather than
     proportional to top_n -- a top_n // 3 reserve collapses to 0 for a small request-driven
     top_n (e.g. 2 or 3), silently removing the exact safety net it exists to provide."""
-    scored = [score_block(b, keywords) for b in blocks]
+    scored = [score_block(b, keywords, keyword_weight=keyword_weight) for b in blocks]
     matched_sorted = sorted((s for s in scored if s.score > 0), key=lambda s: s.score, reverse=True)
     unmatched_sorted = sorted((s for s in scored if s.score == 0), key=lambda s: s.block.id)
 

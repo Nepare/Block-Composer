@@ -12,7 +12,7 @@ from errors import BlockValidationError, LLMError, OperationCancelled
 from llm.prompts import compose_prompt, result_name_prompt
 from llm.router import get_client_and_model
 from progress import ProgressEvent, ProgressSink
-from retrieval import extract_retrieval_signals, rank_blocks
+from retrieval import extract_retrieval_signals, extract_target_count, rank_blocks
 from storage.base import BlockStorage, Result
 from storage.router import get_block_storage, get_result_storage
 
@@ -77,14 +77,7 @@ def _select_candidate_blocks(
             ),
         )
     )
-    top_n = signals.requested_count or settings.compose.keyword_search_top_n
-    if signals.requested_count:
-        progress(
-            ProgressEvent(
-                kind="narrowing",
-                message=f"Request specifies {signals.requested_count} project(s) — narrowing to top {top_n}",
-            )
-        )
+    top_n = settings.compose.keyword_search_top_n
     narrowed = rank_blocks(
         blocks, keywords, top_n=top_n, unmatched_reserve=settings.compose.keyword_search_unmatched_reserve
     )
@@ -115,6 +108,8 @@ def _plan_with_llm(
     settings: Settings,
     model_spec: str | None,
     progress: ProgressSink,
+    *,
+    required_count: int | None = None,
 ) -> list[ComposeSlot]:
     client, model = get_client_and_model(model_spec or settings.models.compose, settings, on_progress=progress)
     candidate_blocks = _select_candidate_blocks(request, store, pinned_ids, settings, progress)
@@ -125,7 +120,7 @@ def _plan_with_llm(
         else ""
     )
     compose_constraints = constraints_module.load(settings, "compose")
-    messages = compose_prompt(request, catalog, pinned_note, compose_constraints)
+    messages = compose_prompt(request, catalog, pinned_note, compose_constraints, required_count=required_count)
     progress(ProgressEvent(kind="plan_start", message=f"Planning against {len(catalog)} block(s) in the library…"))
     reply = client.chat(messages, model, temperature=0.3, max_tokens=1200)
     try:
@@ -154,6 +149,49 @@ def _plan_with_llm(
                 criteria=step.get("criteria"),
             )
         )
+
+    if required_count is not None and len(slots) != required_count:
+        progress(
+            ProgressEvent(
+                kind="plan_retry",
+                message=f"Plan had {len(slots)} step(s), {required_count} required — retrying once…",
+            )
+        )
+        retry_messages = messages + [
+            {"role": "assistant", "content": reply},
+            {
+                "role": "user",
+                "content": f"Your plan had {len(slots)} steps, but exactly {required_count} are "
+                "required. Reply again with the corrected JSON object only, no commentary.",
+            },
+        ]
+        retry_reply = client.chat(retry_messages, model, temperature=0.3, max_tokens=1200)
+        try:
+            retry_steps = _parse_plan_reply(retry_reply)
+            slots = [
+                ComposeSlot(
+                    order=int(step.get("order", i + 1)),
+                    action=step["action"],
+                    block_id=step.get("block_id"),
+                    criteria=step.get("criteria"),
+                )
+                for i, step in enumerate(retry_steps)
+            ]
+        except LLMError:
+            pass  # keep whatever `slots` already held from the last successfully-parsed attempt
+
+    if required_count is not None and len(slots) != required_count:
+        ordered_slots = sorted(slots, key=lambda s: s.order)
+        if len(ordered_slots) > required_count:
+            slots = ordered_slots[:required_count]
+        else:
+            next_order = (max((s.order for s in ordered_slots), default=0)) + 1
+            padding = [
+                ComposeSlot(order=next_order + i, action="generate", block_id=None, criteria=request)
+                for i in range(required_count - len(ordered_slots))
+            ]
+            slots = ordered_slots + padding
+
     return slots
 
 
@@ -163,6 +201,7 @@ def run_compose(
     settings: Settings,
     use_ids: list[str] | None = None,
     generate_criteria: list[str] | None = None,
+    count: int | None = None,
     out_path: Path | None = None,
     model_spec: str | None = None,
     max_generate: int = 8,
@@ -191,6 +230,9 @@ def run_compose(
             "compose needs a request, --use, or --generate — nothing to do with all three empty."
         )
 
+    if count is not None and count <= 0:
+        raise BlockValidationError(f"--count must be a positive integer, got {count}.")
+
     for uid in use_ids:
         store.load(uid)  # raises BlockNotFoundError early if a pinned id doesn't exist
 
@@ -205,9 +247,27 @@ def run_compose(
     pinned_slots = pinned_use_slots + pinned_generate_slots
     total_pinned = len(pinned_slots)
 
+    target_count: int | None = None
+    if count is not None:
+        target_count = count
+    elif request.strip():
+        naming_client, naming_model = get_client_and_model(settings.models.naming, settings, on_progress=progress)
+        compose_constraints = constraints_module.load(settings, "compose")
+        target_count = extract_target_count(request, naming_client, naming_model, compose_constraints)
+
+    required_planned: int | None = None
+    if target_count is not None:
+        required_planned = max(target_count - total_pinned, 0)
+
     planned_slots: list[ComposeSlot] = []
-    if request.strip():
+    if target_count is not None:
+        if required_planned > 0:
+            planned_slots = _plan_with_llm(
+                request, store, set(use_ids), settings, model_spec, progress, required_count=required_planned
+            )
+    elif request.strip():
         planned_slots = _plan_with_llm(request, store, set(use_ids), settings, model_spec, progress)
+    if planned_slots:
         for i, slot in enumerate(planned_slots):
             slot.order = total_pinned + i + 1
 

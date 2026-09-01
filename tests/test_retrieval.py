@@ -1,6 +1,12 @@
 from blocks import Block
 from fakes import FakeLLMClient
-from retrieval import CategorizedKeywords, extract_retrieval_signals, rank_blocks, score_block
+from retrieval import (
+    CategorizedKeywords,
+    extract_retrieval_signals,
+    extract_target_count,
+    rank_blocks,
+    score_block,
+)
 
 
 def test_extract_keywords_parses_all_four_categories():
@@ -18,7 +24,6 @@ def test_extract_keywords_parses_all_four_categories():
     assert signals.keywords.environment == ["Jira", "autoclave"]
     assert signals.keywords.responsibilities == ["surgery prep", "inventory management"]
     assert signals.keywords.domain == ["veterinary", "animal care"]
-    assert signals.requested_count is None
     assert client.call_count == 1
 
 
@@ -39,7 +44,6 @@ def test_extract_keywords_unparseable_reply_yields_all_empty_without_raising():
     signals = extract_retrieval_signals("x", client, "m")
 
     assert signals.keywords.is_empty()
-    assert signals.requested_count is None
 
 
 def test_extract_keywords_swallows_client_exceptions():
@@ -50,7 +54,6 @@ def test_extract_keywords_swallows_client_exceptions():
     signals = extract_retrieval_signals("x", BrokenClient(), "m")
 
     assert signals.keywords.is_empty()
-    assert signals.requested_count is None
 
 
 def test_score_block_weights_environment_and_role_higher():
@@ -167,76 +170,78 @@ def test_extract_keywords_passes_configured_bounds_into_the_prompt():
     assert "2-6" in system_message
 
 
-def test_extract_signals_parses_a_well_formed_project_count():
-    reply = "ROLE: \nENVIRONMENT: \nRESPONSIBILITIES: \nDOMAIN: \nPROJECT_COUNT: 3\n"
-    client = FakeLLMClient(replies=[reply])
+def test_extract_target_count_parses_a_well_formed_reply():
+    client = FakeLLMClient(replies=["3"])
 
-    signals = extract_retrieval_signals("give me 3 projects", client, "m")
+    count = extract_target_count("give me 3 projects", client, "m")
 
-    assert signals.requested_count == 3
-
-
-def test_extract_signals_missing_project_count_line_is_none():
-    reply = "ROLE: engineer\nENVIRONMENT: \nRESPONSIBILITIES: \nDOMAIN: \n"
-    client = FakeLLMClient(replies=[reply])
-
-    signals = extract_retrieval_signals("x", client, "m")
-
-    assert signals.requested_count is None
+    assert count == 3
 
 
-def test_extract_signals_blank_project_count_is_none():
-    reply = "ROLE: \nENVIRONMENT: \nRESPONSIBILITIES: \nDOMAIN: \nPROJECT_COUNT: \n"
-    client = FakeLLMClient(replies=[reply])
+def test_extract_target_count_none_reply_is_none():
+    client = FakeLLMClient(replies=["NONE"])
 
-    signals = extract_retrieval_signals("x", client, "m")
+    count = extract_target_count("highlight backend infrastructure work", client, "m")
 
-    assert signals.requested_count is None
-
-
-def test_extract_signals_non_numeric_project_count_is_none():
-    reply = "ROLE: \nENVIRONMENT: \nRESPONSIBILITIES: \nDOMAIN: \nPROJECT_COUNT: a few\n"
-    client = FakeLLMClient(replies=[reply])
-
-    signals = extract_retrieval_signals("x", client, "m")
-
-    assert signals.requested_count is None
+    assert count is None
 
 
-def test_extract_signals_zero_or_negative_project_count_is_none():
-    for value in ("0", "-2"):
-        reply = f"ROLE: \nENVIRONMENT: \nRESPONSIBILITIES: \nDOMAIN: \nPROJECT_COUNT: {value}\n"
-        client = FakeLLMClient(replies=[reply])
+def test_extract_target_count_discards_a_hallucinated_count_not_present_in_the_request():
+    # the model invents "3" even though the request states no number at all --
+    # observed live for PROJECT_COUNT; the deterministic guard must reject this too
+    client = FakeLLMClient(replies=["3"])
 
-        signals = extract_retrieval_signals("x", client, "m")
+    count = extract_target_count("highlight backend infrastructure work", client, "m")
 
-        assert signals.requested_count is None
-
-
-def test_extract_signals_discards_a_hallucinated_count_not_present_in_the_request():
-    # the model invents PROJECT_COUNT: 3 even though the request states no number at all --
-    # observed live; the deterministic guard must reject this
-    reply = "ROLE: \nENVIRONMENT: \nRESPONSIBILITIES: \nDOMAIN: \nPROJECT_COUNT: 3\n"
-    client = FakeLLMClient(replies=[reply])
-
-    signals = extract_retrieval_signals("highlight backend infrastructure work", client, "m")
-
-    assert signals.requested_count is None
+    assert count is None
 
 
-def test_extract_signals_accepts_a_digit_count_present_in_the_request():
-    reply = "ROLE: \nENVIRONMENT: \nRESPONSIBILITIES: \nDOMAIN: \nPROJECT_COUNT: 3\n"
-    client = FakeLLMClient(replies=[reply])
+def test_extract_target_count_swallows_client_exceptions():
+    class BrokenClient:
+        def chat(self, *a, **kw):
+            raise RuntimeError("network down")
 
-    signals = extract_retrieval_signals("give me 3 projects about backend work", client, "m")
+    count = extract_target_count("x", BrokenClient(), "m")
 
-    assert signals.requested_count == 3
+    assert count is None
 
 
-def test_extract_signals_accepts_a_spelled_out_count_present_in_the_request():
-    reply = "ROLE: \nENVIRONMENT: \nRESPONSIBILITIES: \nDOMAIN: \nPROJECT_COUNT: 3\n"
-    client = FakeLLMClient(replies=[reply])
+def test_extract_target_count_accepts_a_spelled_out_count_present_in_the_request():
+    client = FakeLLMClient(replies=["3"])
 
-    signals = extract_retrieval_signals("give me three projects about backend work", client, "m")
+    count = extract_target_count("give me three projects about backend work", client, "m")
 
-    assert signals.requested_count == 3
+    assert count == 3
+
+
+def test_score_block_default_keyword_weight_matches_explicit_none():
+    keywords = CategorizedKeywords(role=["engineer"], responsibilities=["shipped features"])
+    block = Block(id="x", body="## Engineer Project\n\nDid stuff.\n\n**Responsibilities:**\n- shipped features\n")
+
+    default_scored = score_block(block, keywords)
+    explicit_none_scored = score_block(block, keywords, keyword_weight=None)
+
+    assert default_scored.score == explicit_none_scored.score == 1.5 + 1.0
+    assert default_scored.matched == explicit_none_scored.matched == {
+        "role": ["engineer"],
+        "responsibilities": ["shipped features"],
+    }
+
+
+def test_score_block_keyword_weight_multiplies_into_category_weight():
+    keywords = CategorizedKeywords(role=["engineer"])
+    block = Block(id="x", body="## Engineer Project\n\nDid stuff.\n")
+
+    scored = score_block(block, keywords, keyword_weight=lambda category, kw: 2.0)
+
+    assert scored.score == 3.0  # 1.5 (role weight) * 2.0 (keyword_weight)
+
+
+def test_score_block_keyword_weight_applies_per_matched_keyword():
+    keywords = CategorizedKeywords(role=["engineer", "manager"])
+    block = Block(id="x", body="## Engineer Manager Project\n\nDid stuff.\n")
+    weights = {"engineer": 2.0, "manager": 3.0}
+
+    scored = score_block(block, keywords, keyword_weight=lambda category, kw: weights[kw])
+
+    assert scored.score == 7.5  # 1.5 * (2.0 + 3.0)

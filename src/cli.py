@@ -192,6 +192,7 @@ def compose(
     model: Optional[str] = typer.Option(None, "--model"),
     max_generate: int = typer.Option(8, "--max-generate"),
     dry_run: bool = typer.Option(False, "--dry-run"),
+    count: Optional[int] = typer.Option(None, "--count", "-n", help="Exact target number of projects in the output."),
 ):
     settings = _settings()
     try:
@@ -212,6 +213,7 @@ def compose(
             model_spec=model,
             max_generate=max_generate,
             dry_run=dry_run,
+            count=count,
             on_progress=RichConsoleSink(console),
         )
     except CvdocsError as exc:
