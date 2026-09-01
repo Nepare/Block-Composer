@@ -7,6 +7,9 @@ output/blocks/*.md
 output/results/*.md
 output/results/*.json
 
+# Agent state
+.claude/
+
 # Python
 __pycache__/
 *.py[cod]
