@@ -14,13 +14,16 @@ dependencies = [
     "pydantic",
     "python-dotenv",
     "pyyaml",
+    "fastapi",
+    "uvicorn",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-mock", "ruff"]
+dev = ["pytest", "pytest-mock", "ruff", "httpx"]
 
 [project.scripts]
 cvdocs = "cli:app"
+cvdocs-web = "webapp:main"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -31,7 +34,6 @@ package-dir = {"" = "src"}
 py-modules = [
     "cli",
     "config",
-    "auth",
     "docs_api",
     "templates",
     "blocks",
@@ -42,8 +44,13 @@ py-modules = [
     "mutate",
     "compose",
     "errors",
+    "webapp",
+    "block_fields",
+    "progress",
+    "retrieval",
+    "text_input",
 ]
-packages = ["parsing", "llm", "llm.providers"]
+packages = ["parsing", "llm", "llm.providers", "auth", "storage"]
 
 [tool.ruff]
 line-length = 100

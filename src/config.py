@@ -52,6 +52,10 @@ class GoogleConfig(BaseModel):
     web_redirect_uri: str = "http://localhost:8000/auth/google/callback"
 
 
+class WebServiceConfig(BaseModel):
+    api_key_env: str = "CVDOCS_API_KEY"
+
+
 class PromptConstraintsConfig(BaseModel):
     """Paths to CLAUDE.md/AGENTS.md-style constraint files, one per LLM-using tool. Each
     file's content (if it exists) is appended to that tool's system prompt on every call —
@@ -108,6 +112,7 @@ class Settings(BaseModel):
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
     models: ModelsConfig = Field(default_factory=ModelsConfig)
     google: GoogleConfig = Field(default_factory=GoogleConfig)
+    web_service: WebServiceConfig = Field(default_factory=WebServiceConfig)
     constraints: PromptConstraintsConfig = Field(default_factory=PromptConstraintsConfig)
     compose: ComposeConfig = Field(default_factory=ComposeConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)

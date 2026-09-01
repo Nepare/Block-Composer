@@ -26,6 +26,12 @@ google:
     - https://www.googleapis.com/auth/documents.readonly
   credentials_path: credentials/credentials.json
   token_path: credentials/token.json
+  web_client_id_env: GOOGLE_WEB_CLIENT_ID
+  web_client_secret_env: GOOGLE_WEB_CLIENT_SECRET
+  web_redirect_uri: http://localhost:8000/auth/google/callback
+
+web_service:
+  api_key_env: CVDOCS_API_KEY
 
 constraints:
   generate: input_prompts/constraints/GENERATE_CONSTRAINTS.md

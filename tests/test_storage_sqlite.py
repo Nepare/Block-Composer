@@ -1,10 +1,12 @@
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from blocks import Block
 from errors import BlockNotFoundError
 from fakes import FakeLLMClient
 from storage.base import Result
-from storage.sqlite import SqliteBlockStorage, SqliteResultStorage
+from storage.sqlite import SqliteBlockStorage, SqlitePendingSignInStore, SqliteResultStorage
 
 
 @pytest.fixture
@@ -205,3 +207,41 @@ def test_result_save_with_dedup_variant_on_conflicting_content(db_path):
 def test_result_path_for_is_always_none(db_path):
     store = SqliteResultStorage(db_path)
     assert store.path_for("school_overview") is None
+
+
+def test_pending_sign_in_start_then_verify_and_consume(db_path):
+    store = SqlitePendingSignInStore(db_path)
+    state, code_verifier = store.start()
+    assert store.verify_and_consume(state) == code_verifier
+
+
+def test_pending_sign_in_verify_and_consume_rejects_wrong_state(db_path):
+    store = SqlitePendingSignInStore(db_path)
+    store.start()
+    assert store.verify_and_consume("wrong-state") is None
+
+
+def test_pending_sign_in_verify_and_consume_rejects_stale_attempt(db_path):
+    store = SqlitePendingSignInStore(db_path)
+    state, _ = store.start()
+    stale = (datetime.now(timezone.utc) - timedelta(minutes=11)).isoformat()
+    store._conn.execute("UPDATE sign_in_attempts SET created_at = ?", (stale,))
+
+    assert store.verify_and_consume(state) is None
+
+
+def test_pending_sign_in_start_supersedes_prior_pending_attempt(db_path):
+    store = SqlitePendingSignInStore(db_path)
+    state1, _ = store.start()
+    state2, code_verifier2 = store.start()
+
+    assert store.verify_and_consume(state1) is None
+    assert store.verify_and_consume(state2) == code_verifier2
+
+
+def test_pending_sign_in_verify_and_consume_is_single_use(db_path):
+    store = SqlitePendingSignInStore(db_path)
+    state, code_verifier = store.start()
+
+    assert store.verify_and_consume(state) == code_verifier
+    assert store.verify_and_consume(state) is None

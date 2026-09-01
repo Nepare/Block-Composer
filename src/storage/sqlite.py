@@ -13,8 +13,9 @@ under concurrent web requests, unlike the filesystem backend.
 """
 
 import json
+import secrets
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from google.oauth2.credentials import Credentials
@@ -397,3 +398,54 @@ class SqliteCredentialsStorage:
             scopes=json.loads(row["scopes"]),
             expiry=datetime.fromisoformat(row["expiry"]) if row["expiry"] else None,
         )
+
+
+class SqlitePendingSignInStore:
+    """Anti-replay/anti-CSRF state for the Google OAuth sign-in flow -- at most one
+    pending sign-in attempt exists at a time, backed by a `sign_in_attempts` table."""
+
+    def __init__(self, path: Path | str):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = _connect(self.path)
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sign_in_attempts (
+                state TEXT PRIMARY KEY,
+                code_verifier TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+
+    def start(self) -> tuple[str, str]:
+        state = secrets.token_urlsafe(32)
+        code_verifier = secrets.token_urlsafe(64)
+        self._conn.execute("BEGIN")
+        try:
+            self._conn.execute("DELETE FROM sign_in_attempts")
+            self._conn.execute(
+                "INSERT INTO sign_in_attempts (state, code_verifier, created_at) VALUES (?, ?, ?)",
+                (state, code_verifier, datetime.now(timezone.utc).isoformat()),
+            )
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
+        self._conn.execute("COMMIT")
+        return state, code_verifier
+
+    def verify_and_consume(self, state: str) -> str | None:
+        row = self._conn.execute("SELECT * FROM sign_in_attempts").fetchone()
+        if row is None or row["state"] != state:
+            return None
+        created_at = datetime.fromisoformat(row["created_at"])
+        if datetime.now(timezone.utc) - created_at > timedelta(minutes=10):
+            return None
+        self._conn.execute("BEGIN")
+        try:
+            self._conn.execute("DELETE FROM sign_in_attempts")
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
+        self._conn.execute("COMMIT")
+        return row["code_verifier"]

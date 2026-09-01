@@ -1,0 +1,13 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - CVDOCS_STORAGE_BACKEND=sqlite
+    env_file: .env
+    volumes:
+      - output:/app/output
+
+volumes:
+  output:

@@ -39,7 +39,7 @@ def settings(monkeypatch):
 def test_build_authorization_url_is_well_formed(settings):
     provider = WebAuthProvider(settings, FakeCredentialsStorage())
 
-    url = provider.build_authorization_url(state="xyz")
+    url = provider.build_authorization_url(state="xyz", code_verifier="a-code-verifier")
 
     assert url.startswith("https://accounts.google.com/o/oauth2/auth")
     assert "test-client-id" in url
@@ -75,7 +75,7 @@ def test_exchange_code_returns_credentials_on_success(settings, monkeypatch):
 
     provider = WebAuthProvider(settings, FakeCredentialsStorage())
 
-    result = provider.exchange_code("some-code")
+    result = provider.exchange_code("some-code", code_verifier="a-code-verifier")
 
     assert isinstance(result, Credentials)
     assert result.token == "fake-access-token"
@@ -90,7 +90,40 @@ def test_exchange_code_wraps_a_rejected_response_in_auth_error(settings, monkeyp
     provider = WebAuthProvider(settings, FakeCredentialsStorage())
 
     with pytest.raises(AuthError):
-        provider.exchange_code("bad-code")
+        provider.exchange_code("bad-code", code_verifier="a-code-verifier")
+
+
+def test_exchange_code_sends_the_same_code_verifier_build_authorization_url_used(settings, monkeypatch):
+    """Regression test: build_authorization_url and exchange_code each construct their
+    own Flow instance, so google_auth_oauthlib's per-instance code_verifier can't
+    survive between the two calls on its own — the caller must round-trip the same
+    code_verifier through both. A real Google token endpoint rejects a mismatched (or
+    missing) code_verifier with 'invalid_grant: Missing code verifier.'."""
+    captured = {}
+
+    def fake_fetch_token(self, **kwargs):
+        captured["code_verifier"] = self.code_verifier
+        self.credentials = Credentials(
+            token="t", refresh_token="r", token_uri="https://oauth2.googleapis.com/token",
+            client_id="x", client_secret="y", scopes=settings.google.scopes,
+        )
+        return {}
+
+    monkeypatch.setattr(
+        Flow,
+        "credentials",
+        property(
+            lambda self: self.__dict__.get("credentials"),
+            lambda self, value: self.__dict__.__setitem__("credentials", value),
+        ),
+    )
+    monkeypatch.setattr(Flow, "fetch_token", fake_fetch_token)
+
+    provider = WebAuthProvider(settings, FakeCredentialsStorage())
+    provider.build_authorization_url(state="xyz", code_verifier="the-real-code-verifier")
+    provider.exchange_code("some-code", code_verifier="the-real-code-verifier")
+
+    assert captured["code_verifier"] == "the-real-code-verifier"
 
 
 def test_get_credentials_with_no_stored_connection_raises_auth_error(settings):

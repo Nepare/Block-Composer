@@ -26,20 +26,20 @@ class WebAuthProvider:
             return creds
         raise AuthError("Stored credentials are invalid — reconnect via the Google OAuth web flow.")
 
-    def build_authorization_url(self, state: str) -> str:
-        flow = self._flow()
+    def build_authorization_url(self, state: str, code_verifier: str) -> str:
+        flow = self._flow(code_verifier)
         url, _ = flow.authorization_url(access_type="offline", state=state, prompt="consent")
         return url
 
-    def exchange_code(self, code: str) -> Credentials:
-        flow = self._flow()
+    def exchange_code(self, code: str, code_verifier: str) -> Credentials:
+        flow = self._flow(code_verifier)
         try:
             flow.fetch_token(code=code)
         except Exception as exc:
             raise AuthError(f"Google OAuth token exchange failed: {exc}") from exc
         return flow.credentials
 
-    def _flow(self) -> Flow:
+    def _flow(self, code_verifier: str) -> Flow:
         client_id = os.environ.get(self.settings.google.web_client_id_env, "")
         client_secret = os.environ.get(self.settings.google.web_client_secret_env, "")
         client_config = {
@@ -55,4 +55,5 @@ class WebAuthProvider:
             client_config,
             scopes=self.settings.google.scopes,
             redirect_uri=self.settings.google.web_redirect_uri,
+            code_verifier=code_verifier,
         )

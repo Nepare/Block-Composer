@@ -29,6 +29,9 @@ the exact dependency list — there's no separate `requirements.txt`).
 You need two independent things before the CLI is usable: **Google OAuth** (for `dissect`,
 read-only) and an **OpenRouter API key** (for `generate`/`mutate`/`compose`). Neither is
 related to the other — reading a Doc has nothing to do with which LLM provider you use.
+Running as a **hosted deployment** (Docker, optional — see [section 4](#4-hosted-deployment-optional--docker))
+needs its own, separate Google OAuth client plus one more secret; local CLI use never
+touches those.
 
 ### 1. Google Cloud OAuth (for `dissect`)
 
@@ -66,7 +69,7 @@ choice if you push it there.
 1. Sign up at [openrouter.ai](https://openrouter.ai) (Google/GitHub/email, no card needed).
 2. Go to [openrouter.ai/keys](https://openrouter.ai/keys) → **Create Key** → copy it
    (starts with `sk-or-v1-...`).
-3. Create a `.env` file in the project root (gitignored) with:
+3. Copy `.env.example` to `.env` (gitignored) and set:
    ```
    OPENROUTER_API_KEY=sk-or-v1-...
    ```
@@ -91,6 +94,34 @@ To use it as shipped:
 2. `ollama pull qwen3:1.7b`
 
 No dedicated GPU is required — this is a small model that runs fine on CPU.
+
+### 4. Hosted deployment (optional — Docker)
+
+Running `cvdocs` as a Docker container (`storage.backend: sqlite`) uses a *different*
+Google connection method than the local CLI — a browser-based OAuth flow served over HTTP,
+since there's no local machine for a browser popup to talk to. This needs its own Google
+OAuth client (a **Web application** client, not the Desktop-app one from section 1) plus a
+secret of its own:
+
+1. In the same Google Cloud project as section 1, go to **APIs & Services → Credentials**
+   → **Create Credentials → OAuth client ID** → Application type **Web application**.
+   Under **Authorized redirect URIs**, add `http://localhost:8000/auth/google/callback`
+   (or whatever `google.web_redirect_uri` is set to in `config.yaml`, if you change the
+   port/host). Create, then copy the **Client ID** and **Client secret**.
+2. Pick a long, random value for the shared authorization credential that gates the
+   sign-in link (e.g. `openssl rand -hex 32`) — this is what stops a stranger who finds the
+   URL from starting a connection attempt against your deployment.
+3. Copy `.env.example` to `.env` and fill in `GOOGLE_WEB_CLIENT_ID`,
+   `GOOGLE_WEB_CLIENT_SECRET`, and `CVDOCS_API_KEY` (the value from step 2), alongside
+   `OPENROUTER_API_KEY` from section 2.
+4. `docker compose up --build`, then visit
+   `http://localhost:8000/auth/google/login?key=<your CVDOCS_API_KEY>` in a browser to
+   connect. `docker compose exec app cvdocs auth status` confirms it from inside the
+   container.
+
+This is a single shared connection for the whole deployment (not one per visiting user),
+and is entirely independent of the local CLI's own connection from section 1 — connecting
+one doesn't connect the other.
 
 ## Usage
 
@@ -136,8 +167,16 @@ default for that one call, e.g. `--model openrouter:z-ai/glm-5.3` or
 - `sample_blocks_dir` — default `input_prompts/sample_entries`, the fallback style
   examples `generate` learns from when the block library is still empty.
 - `constraints.*` — paths to the `input_prompts/constraints/*.md` files (see below).
+- `google.web_client_id_env` / `google.web_client_secret_env` / `google.web_redirect_uri` —
+  hosted-deployment-only (see [section 4](#4-hosted-deployment-optional--docker)); the first
+  two name env vars, never hold secrets themselves.
+- `web_service.api_key_env` — names the env var holding the hosted deployment's shared
+  authorization credential (see section 4). Also hosted-only.
 
-The only secret, `OPENROUTER_API_KEY`, lives in a gitignored `.env`, never in `config.yaml`.
+Secrets never live in `config.yaml` — only the *names* of the env vars that hold them do.
+They live in a gitignored `.env` instead: `OPENROUTER_API_KEY` always; `GOOGLE_WEB_CLIENT_ID`,
+`GOOGLE_WEB_CLIENT_SECRET`, and `CVDOCS_API_KEY` only if you're running the hosted deployment
+(section 4). See `.env.example` for the full list.
 
 ## `input_prompts/constraints/`
 
