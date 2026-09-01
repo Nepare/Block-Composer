@@ -10,7 +10,7 @@ A block body always looks like:
 
     Description sentence(s), no ** markers.
 
-    **Author:** value
+    **Role:** value
 
     **Time period:** value
 
@@ -20,7 +20,10 @@ A block body always looks like:
 
     **Environment:** comma, separated, values
 
-Field labels beyond Author/Time period/Environment vary per block (Responsibilities,
+"Role" also accepts "Project roles" and "Author" as aliases -- older/differently-worded
+blocks in the library use those labels for the same concept (see _LABEL_ALIASES).
+
+Field labels beyond Role/Time period/Environment vary per block (Responsibilities,
 Rooms, Characteristics, ...) since they come from whatever the source document or a
 generate/mutate call actually called them — this parser doesn't assume a fixed name for
 them, it just collects whatever it finds into `other_fields`.
@@ -37,7 +40,9 @@ _BULLET_RE = re.compile(r"^-\s+(.+)$")
 _LABEL_ALIASES = {
     "period": "time_period",
     "time period": "time_period",
-    "author": "author",
+    "role": "role",
+    "project roles": "role",
+    "author": "role",
 }
 
 
@@ -45,7 +50,7 @@ _LABEL_ALIASES = {
 class BlockFields:
     name: str = ""
     description: str = ""
-    author: str | None = None
+    role: str | None = None
     time_period: str | None = None
     environment: list[str] = field(default_factory=list)
     other_fields: dict[str, list[str] | str] = field(default_factory=dict)
@@ -79,7 +84,7 @@ def parse_block_body(body: str) -> BlockFields:
         i += 1
     description = " ".join(description_lines)
 
-    author: str | None = None
+    role: str | None = None
     time_period: str | None = None
     environment: list[str] = []
     other_fields: dict[str, list[str] | str] = {}
@@ -89,14 +94,14 @@ def parse_block_body(body: str) -> BlockFields:
     current_bullets: list[str] = []
 
     def flush() -> None:
-        nonlocal author, time_period
+        nonlocal role, time_period
         if current_label is None:
             return
         value: list[str] | str = current_bullets or current_inline_value.strip()
         label_lower = current_label.strip().lower()
         alias = _LABEL_ALIASES.get(label_lower)
-        if alias == "author":
-            author = _field_text(value)
+        if alias == "role":
+            role = _field_text(value)
         elif alias == "time_period":
             time_period = _field_text(value)
         elif label_lower == "environment":
@@ -127,7 +132,7 @@ def parse_block_body(body: str) -> BlockFields:
     return BlockFields(
         name=name,
         description=description,
-        author=author,
+        role=role,
         time_period=time_period,
         environment=environment,
         other_fields=other_fields,

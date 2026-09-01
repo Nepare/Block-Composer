@@ -35,7 +35,7 @@ class Block:
 
     @property
     def fields(self) -> BlockFields:
-        """Structured access to this block's own labeled fields (Author, Environment,
+        """Structured access to this block's own labeled fields (Role, Environment,
         etc.) — see block_fields.py. Recomputed each access rather than cached, since
         nothing here guarantees `body` never changes after construction."""
         return parse_block_body(self.body)

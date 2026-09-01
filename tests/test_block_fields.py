@@ -5,7 +5,7 @@ def test_parses_canonical_shape():
     body = (
         "## Halthera Prime\n\n"
         "A temperate world.\n\n"
-        "**Author:** Cartography Division\n\n"
+        "**Role:** Cartography Division\n\n"
         "**Time period:** Surveyed 03.2147 – 11.2147\n\n"
         "**Environment:** Atmospheric sensors, Orbital survey array, A long-range probe\n"
     )
@@ -13,7 +13,7 @@ def test_parses_canonical_shape():
 
     assert fields.name == "Halthera Prime"
     assert fields.description == "A temperate world."
-    assert fields.author == "Cartography Division"
+    assert fields.role == "Cartography Division"
     assert fields.time_period == "Surveyed 03.2147 – 11.2147"
     assert fields.environment == ["Atmospheric sensors", "Orbital survey array", "A long-range probe"]
 
@@ -37,6 +37,16 @@ def test_multiple_nonstandard_fields_stay_distinct():
     assert fields.other_fields["settlements"] == "City A, City B"
 
 
+def test_project_roles_and_author_are_both_legal_aliases_for_role():
+    role = parse_block_body("## X\n\n**Role:** Backend Developer\n")
+    project_roles = parse_block_body("## X\n\n**Project roles:** Backend Developer\n")
+    author = parse_block_body("## X\n\n**Author:** Backend Developer\n")
+
+    assert role.role == "Backend Developer"
+    assert project_roles.role == "Backend Developer"
+    assert author.role == "Backend Developer"
+
+
 def test_period_and_time_period_both_map_to_time_period():
     a = parse_block_body("## X\n\n**Period:** 2020\n")
     b = parse_block_body("## X\n\n**Time period:** 2020\n")
@@ -57,7 +67,7 @@ def test_missing_sections_degrade_gracefully_without_raising():
 
     assert fields.name == "Just A Name"
     assert fields.description == ""
-    assert fields.author is None
+    assert fields.role is None
     assert fields.time_period is None
     assert fields.environment == []
     assert fields.other_fields == {}
@@ -67,7 +77,7 @@ def test_completely_empty_body_does_not_raise():
     fields = parse_block_body("")
 
     assert fields.name == ""
-    assert fields.author is None
+    assert fields.role is None
 
 
 def test_real_shipped_sample_blocks_parse_correctly():
@@ -80,7 +90,7 @@ def test_real_shipped_sample_blocks_parse_correctly():
         post = frontmatter.load(str(path))
         fields = parse_block_body(post.content)
         assert fields.name
-        assert fields.author
+        assert fields.role
         assert fields.time_period
         assert fields.environment
         assert "responsibilities" in fields.other_fields
