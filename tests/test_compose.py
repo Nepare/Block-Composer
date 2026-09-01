@@ -5,14 +5,15 @@ import pytest
 import compose as compose_module
 import generate as generate_module
 import mutate as mutate_module
-from blocks import Block, BlockStore
+from blocks import Block
 from errors import BlockNotFoundError, BlockValidationError
 from fakes import FakeLLMClient
 from progress import ProgressEvent
+from storage.filesystem import FilesystemBlockStorage
 
 
 def _seed_library(settings):
-    store = BlockStore(settings.blocks_path)
+    store = FilesystemBlockStorage(settings.blocks_path)
     store.save(
         Block(id="", body="## School\n\nTeaches children.\n\n**Rooms:**\n- Classroom\n"),
         filename_stem="school",
@@ -27,7 +28,7 @@ def _seed_library(settings):
 def _seed_large_library(settings, count=5):
     """At/above settings.compose.keyword_search_min_blocks (5 by default) so the
     keyword-search narrowing path actually engages."""
-    store = BlockStore(settings.blocks_path)
+    store = FilesystemBlockStorage(settings.blocks_path)
     for i in range(count):
         store.save(
             Block(id="", body=f"## Block {i}\n\nGeneric entry {i}.\n\n**Environment:** Jira\n"),
@@ -426,6 +427,30 @@ def test_pinned_slots_are_unaffected_by_a_large_library(settings, fake_router):
 
     assert slots[0].resolved_id == "block_0"
     assert client.call_count == 1  # just the result-naming call
+
+
+def test_compose_works_against_fake_block_and_result_storage(settings, fake_router, fake_storage):
+    """Proves the BlockStorage/ResultStorage Protocols are complete: run_compose works
+    unmodified against in-memory fakes, not just the filesystem implementations."""
+    from fakes import FakeBlockStorage, FakeResultStorage
+
+    fake_blocks = FakeBlockStorage()
+    fake_blocks.save(
+        Block(id="", body="## School\n\nTeaches children.\n\n**Rooms:**\n- Classroom\n"),
+        filename_stem="school",
+    )
+    fake_results = FakeResultStorage()
+    fake_storage(compose_module, block_store=fake_blocks, result_store=fake_results)
+    fake_router(compose_module, FakeLLMClient(replies=["school_overview"]))
+
+    slots, result_path = compose_module.run_compose("", settings=settings, use_ids=["school"])
+
+    assert slots[0].resolved_id == "school"
+    # a fake (like a future DB backend) has no filesystem path -- None is the correct,
+    # honest result here, not a made-up path
+    assert result_path is None
+    saved = fake_results.load("school_overview")
+    assert "## School" in saved.content
 
 
 def test_dry_run_still_reports_the_plan_built_progress_line(settings, fake_router):

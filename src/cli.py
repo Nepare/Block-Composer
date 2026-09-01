@@ -12,10 +12,10 @@ import compose as compose_module
 import dissect as dissect_module
 import generate as generate_module
 import mutate as mutate_module
-from blocks import BlockStore
 from config import load_settings
 from errors import CvdocsError
 from progress import RichConsoleSink
+from storage.router import get_block_storage
 from text_input import resolve_text_input
 
 app = typer.Typer(add_completion=False, help="cvdocs — a configurable block library and composer.")
@@ -79,11 +79,11 @@ def dissect(
     table = Table(title="Dissect summary")
     table.add_column("Result")
     table.add_column("Block")
-    table.add_column("Path / note")
-    for block, path in result.saved:
-        table.add_row("saved", escape(block.name), escape(str(path)))
-    for block, path, label in result.variants:
-        table.add_row(escape(f"variant [{label}]"), escape(block.name), escape(str(path)))
+    table.add_column("id")
+    for block, stem in result.saved:
+        table.add_row("saved", escape(block.name), escape(stem))
+    for block, stem, label in result.variants:
+        table.add_row(escape(f"variant [{label}]"), escape(block.name), escape(stem))
     for name, dup_of in result.skipped_duplicates:
         table.add_row("skipped (duplicate)", escape(name), escape(f"matches {dup_of}"))
     console.print(table)
@@ -109,7 +109,7 @@ def generate(
         _print_error(exc)
         raise typer.Exit(1)
 
-    store = BlockStore(settings.blocks_path)
+    store = get_block_storage(settings)
     try:
         style_blocks = [store.load(bid) for bid in style_from] if style_from else None
     except CvdocsError as exc:
@@ -118,7 +118,7 @@ def generate(
 
     for _ in range(count):
         try:
-            _block, decision, path = generate_module.run_generate(
+            _block, decision, stem = generate_module.run_generate(
                 criteria_text,
                 settings=settings,
                 schema=schema,
@@ -132,7 +132,7 @@ def generate(
         if decision.action == "skip_duplicate":
             console.print(f"[yellow]Skipped — duplicate of {escape(decision.duplicate_of or '')}[/yellow]")
         else:
-            console.print(f"[green]Saved[/green] {escape(str(path))}")
+            console.print(f"[green]Saved[/green] {escape(stem)}")
 
 
 @app.command()
@@ -155,7 +155,7 @@ def mutate(
         raise typer.Exit(1)
 
     try:
-        _block, path = mutate_module.run_mutate(
+        _block, stem = mutate_module.run_mutate(
             block_id,
             criteria_text,
             settings=settings,
@@ -166,7 +166,7 @@ def mutate(
     except CvdocsError as exc:
         _print_error(exc)
         raise typer.Exit(1)
-    console.print(f"[green]Saved[/green] {escape(str(path))}")
+    console.print(f"[green]Saved[/green] {escape(stem)}")
 
 
 @app.command()
@@ -218,8 +218,14 @@ def compose(
 
     if dry_run:
         console.print("[yellow]Dry run — nothing written.[/yellow]")
-    else:
+    elif result_path:
         console.print(f"[green]Written[/green] {escape(str(result_path))}")
+    else:
+        # A non-filesystem backend (e.g. sqlite) has no path to show, so a successful
+        # save also returns None here -- same as a cancelled run does. The CLI has no way
+        # to trigger cancel_check today (no flag wires it up), so that ambiguity isn't
+        # reachable yet; revisit this branch if/when a CLI cancellation trigger exists.
+        console.print("[green]Saved.[/green]")
 
 
 @blocks_app.command("list")
@@ -228,7 +234,7 @@ def blocks_list(
     query: Optional[str] = typer.Option(None, "--query"),
 ):
     settings = _settings()
-    store = BlockStore(settings.blocks_path)
+    store = get_block_storage(settings)
     results = store.search(query=query, tags=tag or None)
     table = Table(title="Blocks")
     table.add_column("id")
@@ -243,7 +249,7 @@ def blocks_list(
 @blocks_app.command("show")
 def blocks_show(block_id: str = typer.Argument(...)):
     settings = _settings()
-    store = BlockStore(settings.blocks_path)
+    store = get_block_storage(settings)
     try:
         block = store.load(block_id)
     except CvdocsError as exc:

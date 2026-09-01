@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from dotenv import load_dotenv
@@ -79,6 +79,17 @@ class ComposeConfig(BaseModel):
     keywords_per_category_max: int = 4
 
 
+class StorageConfig(BaseModel):
+    """Picks the storage backend for blocks/results via storage/router.py's dispatch —
+    "filesystem" (flat Markdown, the CLI/local default) or "sqlite" (the Docker/web
+    deployment backend). Override with the CVDOCS_STORAGE_BACKEND env var (see
+    load_settings) when "am I running in a container" needs to decide this rather than
+    config.yaml."""
+
+    backend: Literal["filesystem", "sqlite"] = "filesystem"
+    sqlite_path: str = "output/cvdocs.db"
+
+
 class Settings(BaseModel):
     blocks_dir: str = "output/blocks"
     results_dir: str = "output/results"
@@ -92,6 +103,7 @@ class Settings(BaseModel):
     google: GoogleConfig = Field(default_factory=GoogleConfig)
     constraints: PromptConstraintsConfig = Field(default_factory=PromptConstraintsConfig)
     compose: ComposeConfig = Field(default_factory=ComposeConfig)
+    storage: StorageConfig = Field(default_factory=StorageConfig)
 
     def resolve(self, relative: str | Path) -> Path:
         p = Path(relative)
@@ -117,13 +129,27 @@ class Settings(BaseModel):
     def logs_path(self) -> Path:
         return self.resolve(self.logs_dir)
 
+    @property
+    def storage_db_path(self) -> Path:
+        return self.resolve(self.storage.sqlite_path)
+
 
 def load_settings(config_path: Path | str | None = None) -> Settings:
     """CLI flag > env > .env > config.yaml > defaults. CLI-flag overrides are applied by
-    callers on top of the returned Settings; env/.env only ever supply OPENROUTER_API_KEY."""
+    callers on top of the returned Settings; env/.env supply OPENROUTER_API_KEY, and — as
+    a deliberate, narrow exception — CVDOCS_STORAGE_BACKEND, which overrides
+    storage.backend specifically. Unlike every other setting, "am I running in a
+    container" is a deployment-environment fact, not a config.yaml-worthy preference, so
+    it's the one other value allowed to come from the environment. An invalid value isn't
+    validated here — it's caught the same place a bad config.yaml value already is,
+    storage/router.py's ConfigError."""
     load_dotenv(PROJECT_ROOT / ".env")
     path = Path(config_path) if config_path else PROJECT_ROOT / "config.yaml"
     data: dict[str, Any] = {}
     if path.exists():
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    return Settings.model_validate(data)
+    settings = Settings.model_validate(data)
+    env_backend = os.environ.get("CVDOCS_STORAGE_BACKEND")
+    if env_backend:
+        settings.storage.backend = env_backend
+    return settings

@@ -1,14 +1,15 @@
 import pytest
 
 import mutate as mutate_module
-from blocks import Block, BlockStore
+from blocks import Block
 from errors import BlockNotFoundError, OperationCancelled
 from fakes import FakeLLMClient
 from progress import ProgressEvent
+from storage.filesystem import FilesystemBlockStorage
 
 
 def _seed(settings, stem="police_station", body="## Police Station\n\nRegular.\n\n**Rooms:**\n- Office\n", tags=None):
-    store = BlockStore(settings.blocks_path)
+    store = FilesystemBlockStorage(settings.blocks_path)
     store.save(Block(id="", body=body, tags=tags or [], created_by="dissected"), filename_stem=stem)
     return store
 
@@ -22,9 +23,9 @@ def test_run_mutate_single_call_produces_body_and_bracket_label(settings, fake_r
     client = FakeLLMClient(replies=[reply])
     fake_router(mutate_module, client)
 
-    block, path = mutate_module.run_mutate("police_station", "make it sheriff-themed", settings=settings)
+    block, stem = mutate_module.run_mutate("police_station", "make it sheriff-themed", settings=settings)
 
-    assert path.name == "police_station_mut_sheriff.md"
+    assert stem == "police_station_mut_sheriff"
     assert block.mutated_from == "police_station"
     assert block.created_by == "mutated"
     assert client.call_count == 1
@@ -35,7 +36,7 @@ def test_run_mutate_inherits_tags_from_the_original(settings, fake_router):
     reply = "===BODY===\n## Police Station\n\nSheriff-run now.\n\n**Rooms:**\n- Office\n===LABEL===\nsheriff"
     fake_router(mutate_module, FakeLLMClient(replies=[reply]))
 
-    block, _path = mutate_module.run_mutate("police_station", "re-theme", settings=settings)
+    block, _stem = mutate_module.run_mutate("police_station", "re-theme", settings=settings)
 
     assert block.tags == ["police_station", "law"]
 
@@ -52,11 +53,11 @@ def test_run_mutate_that_changes_the_subject_gets_its_own_fresh_name(settings, f
     client = FakeLLMClient(replies=[reply])
     fake_router(mutate_module, client)
 
-    block, path = mutate_module.run_mutate(
+    block, stem = mutate_module.run_mutate(
         "lumber", "re-theme as a stone quarry instead of a lumber camp", settings=settings
     )
 
-    assert path.name == "stone_quarry.md"
+    assert stem == "stone_quarry"
     assert block.name == "Stone Quarry"
     assert client.call_count == 1  # brand-new name, no collision -> no second naming call
 
@@ -78,11 +79,11 @@ def test_run_mutate_renamed_result_that_collides_gets_bracket_named_under_its_ne
     client = FakeLLMClient(replies=[reply, "reopened"])  # second call: naming conflict label
     fake_router(mutate_module, client)
 
-    _block, path = mutate_module.run_mutate(
+    _block, stem = mutate_module.run_mutate(
         "lumber", "re-theme as a stone quarry", settings=settings
     )
 
-    assert path.name == "stone_quarry_mut_reopened.md"
+    assert stem == "stone_quarry_mut_reopened"
     assert client.call_count == 2
 
 
@@ -103,9 +104,9 @@ def test_run_mutate_in_place_overwrites_the_same_file(settings, fake_router):
     reply = "===BODY===\n## Police Station\n\nUpdated in place.\n\n**Rooms:**\n- Office\n===LABEL===\nignored"
     fake_router(mutate_module, FakeLLMClient(replies=[reply]))
 
-    _block, path = mutate_module.run_mutate("police_station", "update", settings=settings, in_place=True)
+    _block, stem = mutate_module.run_mutate("police_station", "update", settings=settings, in_place=True)
 
-    assert path.name == "police_station.md"
+    assert stem == "police_station"
     assert "Updated in place." in store.load("police_station").body
 
 
@@ -119,9 +120,9 @@ def test_run_mutate_retries_once_on_malformed_reply(settings, fake_router):
     )
     fake_router(mutate_module, client)
 
-    _block, path = mutate_module.run_mutate("police_station", "fix", settings=settings)
+    _block, stem = mutate_module.run_mutate("police_station", "fix", settings=settings)
 
-    assert path.name == "police_station_mut_sheriff.md"
+    assert stem == "police_station_mut_sheriff"
     assert client.call_count == 2
 
 
@@ -140,9 +141,9 @@ def test_run_mutate_second_variant_gets_a_distinct_filename(settings, fake_route
 
     second_reply = "===BODY===\n## Police Station\n\nSheriff v2.\n\n**Rooms:**\n- Office\n===LABEL===\nsheriff"
     fake_router(mutate_module, FakeLLMClient(replies=[second_reply]))
-    _block, path2 = mutate_module.run_mutate("police_station", "sheriff again", settings=settings)
+    _block, stem2 = mutate_module.run_mutate("police_station", "sheriff again", settings=settings)
 
-    assert path2.name == "police_station_mut_sheriff_2.md"
+    assert stem2 == "police_station_mut_sheriff_2"
 
 
 def test_run_mutate_fires_progress_events_around_the_call(settings, fake_router):

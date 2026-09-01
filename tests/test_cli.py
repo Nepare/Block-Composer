@@ -31,7 +31,7 @@ def test_generate_criteria_file_is_read_and_passed_through(tmp_path, cli_setting
 
     def fake_run_generate(criteria, **kwargs):
         captured["criteria"] = criteria
-        return SimpleNamespace(), SimpleNamespace(action="save_plain", duplicate_of=None), tmp_path / "result.md"
+        return SimpleNamespace(), SimpleNamespace(action="save_plain", duplicate_of=None), "result"
 
     monkeypatch.setattr(cli.generate_module, "run_generate", fake_run_generate)
 

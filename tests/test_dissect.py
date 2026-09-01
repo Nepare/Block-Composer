@@ -3,9 +3,9 @@ from pathlib import Path
 
 import dissect as dissect_module
 import docs_api
-from blocks import BlockStore
 from fakes import FakeLLMClient
 from progress import ProgressEvent
+from storage.filesystem import FilesystemBlockStorage
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "greentown_doc_response.json"
 
@@ -31,7 +31,7 @@ def test_run_dissect_extracts_both_blocks_with_zero_llm_calls(settings, fake_rou
     assert result.variants == []
     assert client.call_count == 0
 
-    store = BlockStore(settings.blocks_path)
+    store = FilesystemBlockStorage(settings.blocks_path)
     police = store.load("police_station")
     assert "**Environment:** 5 wood, 2 iron, 10 gold." in police.body
     assert police.body.count("**Environment:**") == 1

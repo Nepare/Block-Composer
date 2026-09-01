@@ -1,20 +1,21 @@
 import pytest
 
 import generate as generate_module
-from blocks import Block, BlockStore
+from blocks import Block
 from errors import BlockValidationError, OperationCancelled
 from fakes import FakeLLMClient
 from progress import ProgressEvent
+from storage.filesystem import FilesystemBlockStorage
 
 
 def test_run_generate_saves_valid_reply(settings, fake_router):
     client = FakeLLMClient(replies=["## Sheriff Outpost\n\nA frontier outpost.\n\n**Role:** nobody\n"])
     fake_router(generate_module, client)
 
-    block, decision, path = generate_module.run_generate("a sheriff outpost", settings=settings)
+    block, decision, stem = generate_module.run_generate("a sheriff outpost", settings=settings)
 
     assert decision.action == "save_plain"
-    assert path.name == "sheriff_outpost.md"
+    assert stem == "sheriff_outpost"
     assert block.created_by == "generated"
     assert block.generation_criteria == "a sheriff outpost"
     assert client.call_count == 1
@@ -55,7 +56,7 @@ def test_run_generate_falls_back_to_shipped_samples_when_library_is_empty(settin
 
 
 def test_run_generate_prefers_explicit_style_from_over_library(settings, fake_router):
-    store = BlockStore(settings.blocks_path)
+    store = FilesystemBlockStorage(settings.blocks_path)
     store.save(Block(id="", body="## Unrelated\n\nNoise.\n"), filename_stem="unrelated")
     exemplar = Block(id="exemplar", body="## Custom Exemplar\n\nUse my shape.\n")
 
@@ -70,7 +71,7 @@ def test_run_generate_prefers_explicit_style_from_over_library(settings, fake_ro
 
 
 def test_run_generate_dedups_against_existing_library(settings, fake_router):
-    store = BlockStore(settings.blocks_path)
+    store = FilesystemBlockStorage(settings.blocks_path)
     store.save(Block(id="", body="## Sheriff Outpost\n\nAlready here.\n"), filename_stem="sheriff_outpost")
 
     client = FakeLLMClient(
@@ -81,10 +82,10 @@ def test_run_generate_dedups_against_existing_library(settings, fake_router):
     )
     fake_router(generate_module, client)
 
-    _block, decision, path = generate_module.run_generate("a sheriff outpost", settings=settings)
+    _block, decision, stem = generate_module.run_generate("a sheriff outpost", settings=settings)
 
     assert decision.action == "save_variant"
-    assert path.name == "sheriff_outpost_mut_variant.md"
+    assert stem == "sheriff_outpost_mut_variant"
 
 
 def test_run_generate_fires_progress_events_around_the_call_and_naming(settings, fake_router):
@@ -118,6 +119,23 @@ def test_run_generate_raises_operation_cancelled_before_the_retry(settings, fake
         generate_module.run_generate("a sheriff outpost", settings=settings, cancel_check=lambda: True)
     # only the first (failed) attempt was made -- the retry never fires once cancelled
     assert client.call_count == 1
+
+
+def test_run_generate_works_against_a_fake_block_storage(settings, fake_router, fake_storage):
+    """Proves the BlockStorage Protocol is complete: run_generate works unmodified
+    against an in-memory fake, not just FilesystemBlockStorage."""
+    from fakes import FakeBlockStorage
+
+    fake_block_store = FakeBlockStorage()
+    fake_storage(generate_module, block_store=fake_block_store)
+    client = FakeLLMClient(replies=["## Sheriff Outpost\n\nA frontier outpost.\n\n**Role:** nobody\n"])
+    fake_router(generate_module, client)
+
+    block, decision, stem = generate_module.run_generate("a sheriff outpost", settings=settings)
+
+    assert decision.action == "save_plain"
+    assert stem == "sheriff_outpost"
+    assert fake_block_store.load("sheriff_outpost") is block
 
 
 def test_run_generate_includes_constraints_file_in_the_system_prompt(settings, fake_router, tmp_path):

@@ -37,6 +37,22 @@ def fake_router(monkeypatch):
     return _patch
 
 
+@pytest.fixture
+def fake_storage(monkeypatch):
+    """fake_storage(module, block_store=..., result_store=...) makes
+    `module.get_block_storage`/`get_result_storage` return the given fake instead of
+    dispatching for real — proves a caller (run_generate/run_mutate/run_compose/...)
+    works against the Protocol alone, not against FilesystemBlockStorage specifically."""
+
+    def _patch(module, *, block_store=None, result_store=None):
+        if block_store is not None:
+            monkeypatch.setattr(module, "get_block_storage", lambda settings: block_store)
+        if result_store is not None:
+            monkeypatch.setattr(module, "get_result_storage", lambda settings: result_store)
+
+    return _patch
+
+
 @pytest.fixture(autouse=True)
 def _clear_llm_router_cache():
     """llm.router caches one client per provider at module scope; reset it between tests

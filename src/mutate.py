@@ -1,15 +1,15 @@
-from pathlib import Path
 from typing import Callable
 
 import constraints as constraints_module
 import naming
-from blocks import Block, BlockStore
+from blocks import Block
 from config import Settings
 from errors import BlockValidationError, OperationCancelled
 from generate import validate_block_shape
 from llm.prompts import mutate_prompt
 from llm.router import get_client_and_model
 from progress import ProgressEvent, ProgressSink
+from storage.router import get_block_storage
 
 
 def _parse_mutation_reply(reply: str) -> tuple[str, str]:
@@ -39,11 +39,11 @@ def run_mutate(
     in_place: bool = False,
     on_progress: ProgressSink | None = None,
     cancel_check: Callable[[], bool] | None = None,
-) -> tuple[Block, Path]:
+) -> tuple[Block, str]:
     """`on_progress`/`cancel_check` mirror compose.run_compose's — optional, no-op by
     default, so this stays silent and uncancellable when called directly as before."""
     progress = on_progress or (lambda _event: None)
-    store = BlockStore(settings.blocks_path)
+    store = get_block_storage(settings)
     original = store.load(block_id)
 
     client, model = get_client_and_model(model_spec or settings.models.mutate, settings, on_progress=progress)
@@ -86,18 +86,18 @@ def run_mutate(
     )
 
     if in_place:
-        path = store.save(mutated, filename_stem=original.id)
-        progress(ProgressEvent(kind="mutate_done", message=f"Mutated -> {path.stem}", block_id=path.stem))
-        return mutated, path
+        stem = store.save(mutated, filename_stem=original.id)
+        progress(ProgressEvent(kind="mutate_done", message=f"Mutated -> {stem}", block_id=stem))
+        return mutated, stem
 
     if naming.slugify(mutated.name) == naming.slugify(original.name):
         # Same subject, just adapted -- the mutate call's own `label` already names the
         # variant, so no second naming call is needed.
         base_slug = naming.slugify(original.name)
-        stem = naming.unique_stem(f"{base_slug}_mut_{naming.slugify(label)}", store.exists)
-        path = store.save(mutated, filename_stem=stem)
-        progress(ProgressEvent(kind="mutate_done", message=f"Mutated -> {path.stem}", block_id=path.stem))
-        return mutated, path
+        variant_stem = naming.unique_stem(f"{base_slug}_mut_{naming.slugify(label)}", store.exists)
+        stem = store.save(mutated, filename_stem=variant_stem)
+        progress(ProgressEvent(kind="mutate_done", message=f"Mutated -> {stem}", block_id=stem))
+        return mutated, stem
 
     # The mutation turned this into a genuinely different thing (e.g. "Lumber" ->
     # "Stone Quarry") -- it's not a variant of the original, so it gets its own name via
@@ -105,15 +105,15 @@ def run_mutate(
     progress(ProgressEvent(kind="naming", message="Checking for duplicates / naming result…"))
     naming_client, naming_model = get_client_and_model(settings.models.naming, settings, on_progress=progress)
     naming_constraints = constraints_module.load(settings, "naming")
-    decision, path = store.save_with_dedup(
+    decision, stem = store.save_with_dedup(
         mutated,
         naming_client=naming_client,
         naming_model=naming_model,
         naming_constraints=naming_constraints,
     )
-    if path is None:
+    if stem is None:
         # exact duplicate of something already in the library -- reuse it rather than
         # silently discarding the mutation the user asked for
-        path = store.path_for(decision.duplicate_of)
-    progress(ProgressEvent(kind="mutate_done", message=f"Mutated -> {path.stem}", block_id=path.stem))
-    return mutated, path
+        stem = decision.duplicate_of
+    progress(ProgressEvent(kind="mutate_done", message=f"Mutated -> {stem}", block_id=stem))
+    return mutated, stem

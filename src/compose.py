@@ -6,14 +6,15 @@ from typing import Callable
 import constraints as constraints_module
 import generate
 import mutate
-import naming
-from blocks import Block, BlockStore
+from blocks import Block
 from config import Settings
 from errors import BlockValidationError, LLMError, OperationCancelled
 from llm.prompts import compose_prompt, result_name_prompt
 from llm.router import get_client_and_model
 from progress import ProgressEvent, ProgressSink
 from retrieval import extract_retrieval_signals, rank_blocks
+from storage.base import BlockStorage, Result
+from storage.router import get_block_storage, get_result_storage
 
 
 @dataclass
@@ -32,7 +33,7 @@ def _catalog(blocks: list[Block]) -> list[dict]:
 
 def _select_candidate_blocks(
     request: str,
-    store: BlockStore,
+    store: BlockStorage,
     exclude_ids: set[str],
     settings: Settings,
     progress: ProgressSink,
@@ -109,7 +110,7 @@ def _parse_plan_reply(reply: str) -> list[dict]:
 
 def _plan_with_llm(
     request: str,
-    store: BlockStore,
+    store: BlockStorage,
     pinned_ids: set[str],
     settings: Settings,
     model_spec: str | None,
@@ -181,7 +182,7 @@ def run_compose(
     stay saved (each slot persists independently as it completes) — only the combined
     result is skipped."""
     progress = on_progress or (lambda _event: None)
-    store = BlockStore(settings.blocks_path)
+    store = get_block_storage(settings)
     use_ids = use_ids or []
     generate_criteria = generate_criteria or []
 
@@ -259,7 +260,7 @@ def run_compose(
                 )
             )
             try:
-                _block, path = mutate.run_mutate(
+                _block, stem = mutate.run_mutate(
                     slot.block_id,
                     slot.criteria or "",
                     settings=settings,
@@ -276,7 +277,7 @@ def run_compose(
                     )
                 )
                 return sorted(all_slots, key=lambda s: s.order), None
-            slot.resolved_id = path.stem
+            slot.resolved_id = stem
             progress(
                 ProgressEvent(
                     kind="mutate_done", message=f"[{i}/{total}] mutated -> {slot.resolved_id}", step=i, total=total
@@ -287,7 +288,7 @@ def run_compose(
                 ProgressEvent(kind="generate_start", message=f"[{i}/{total}] generating new block…", step=i, total=total)
             )
             try:
-                _block, decision, path = generate.run_generate(
+                _block, decision, stem = generate.run_generate(
                     slot.criteria or "",
                     settings=settings,
                     on_progress=progress,
@@ -303,7 +304,7 @@ def run_compose(
                     )
                 )
                 return sorted(all_slots, key=lambda s: s.order), None
-            slot.resolved_id = path.stem if path else decision.duplicate_of
+            slot.resolved_id = stem or decision.duplicate_of
             progress(
                 ProgressEvent(
                     kind="generate_done",
@@ -318,7 +319,16 @@ def run_compose(
     content = "\n\n---\n\n".join(bodies)
 
     progress(ProgressEvent(kind="naming", message="Naming result…"))
-    result_path = _save_result(content, settings, out_path, progress)
+    result_path = _save_result(
+        content,
+        settings,
+        out_path,
+        progress,
+        request=request,
+        use_ids=use_ids,
+        generate_criteria=generate_criteria,
+        slots=ordered,
+    )
     return ordered, result_path
 
 
@@ -341,41 +351,54 @@ def _generate_result_name(content: str, settings: Settings, progress: ProgressSi
     return name
 
 
-def _save_result(content: str, settings: Settings, out_path: Path | None, progress: ProgressSink) -> Path:
-    """Goes through the same naming.decide() flow as blocks: brand-new name -> saved
-    plainly; a same-slug result already exists -> exact-match reuse or a _mut_ variant."""
+def _save_result(
+    content: str,
+    settings: Settings,
+    out_path: Path | None,
+    progress: ProgressSink,
+    *,
+    request: str,
+    use_ids: list[str],
+    generate_criteria: list[str],
+    slots: list[ComposeSlot],
+) -> Path:
+    """Goes through the same naming.decide() flow as blocks, via ResultStorage.
+    save_with_dedup: brand-new name -> saved plainly; a same-slug result already exists
+    -> exact-match reuse or a _mut_ variant. `out_path` is an explicit filesystem
+    override — it bypasses the storage abstraction entirely and writes exactly there,
+    same as it always did (a user-supplied path isn't a backend-agnostic concept)."""
     if out_path:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(content, encoding="utf-8")
         return out_path
 
-    results_dir = settings.results_path
-    results_dir.mkdir(parents=True, exist_ok=True)
-
     title = _generate_result_name(content, settings, progress)
-    base_slug = naming.slugify(title)[:60].rstrip("_") or "result"
-    candidate = naming.Candidate(name=title, full_text=content)
-
-    existing = [
-        (p.stem, naming.Candidate(name=title, full_text=p.read_text(encoding="utf-8")))
-        for p in results_dir.glob(f"{base_slug}*.md")
-        if p.stem == base_slug or p.stem.startswith(f"{base_slug}_mut_")
-    ]
+    result_store = get_result_storage(settings)
+    result = Result(
+        content=content,
+        name=title,
+        request=request,
+        use_ids=list(use_ids),
+        generate_criteria=list(generate_criteria),
+        slots=[
+            {
+                "order": s.order,
+                "action": s.action,
+                "block_id": s.block_id,
+                "criteria": s.criteria,
+                "resolved_id": s.resolved_id,
+            }
+            for s in slots
+        ],
+    )
 
     naming_client, naming_model = get_client_and_model(settings.models.naming, settings, on_progress=progress)
     naming_constraints = constraints_module.load(settings, "naming")
-    decision = naming.decide(
-        candidate,
-        existing,
-        exists=lambda stem: (results_dir / f"{stem}.md").exists(),
+    decision, stem = result_store.save_with_dedup(
+        result,
         naming_client=naming_client,
         naming_model=naming_model,
-        constraints=naming_constraints,
+        naming_constraints=naming_constraints,
     )
-
-    if decision.action == "skip_duplicate":
-        return results_dir / f"{decision.duplicate_of}.md"
-
-    path = results_dir / f"{decision.stem}.md"
-    path.write_text(content, encoding="utf-8")
-    return path
+    final_stem = stem or decision.duplicate_of
+    return result_store.path_for(final_stem)
