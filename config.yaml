@@ -37,4 +37,4 @@ compose:
   keyword_search_top_n: 12 # number of most relevant blocks to consider
   keyword_search_unmatched_reserve: 2 # number of unmatched blocks to reserve (near keyword score miss)
   keywords_per_category_min: 0
-  keywords_per_category_max: 4 # range of generated keywords per category when processing a request
+  keywords_per_category_max: 10 # range of generated keywords per category when processing a request

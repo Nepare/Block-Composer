@@ -15,6 +15,7 @@ import mutate as mutate_module
 from blocks import BlockStore
 from config import load_settings
 from errors import CvdocsError
+from text_input import resolve_text_input
 
 app = typer.Typer(add_completion=False, help="cvdocs — a configurable block library and composer.")
 auth_app = typer.Typer(help="Google OAuth login/status.")
@@ -85,13 +86,24 @@ def dissect(
 
 @app.command()
 def generate(
-    criteria: str = typer.Option(..., "--criteria"),
+    criteria: Optional[str] = typer.Option(None, "--criteria", help="Generation criteria, inline."),
+    criteria_file: Optional[Path] = typer.Option(
+        None, "--criteria-file", "-f", help="Read criteria from a UTF-8 .txt/.md file."
+    ),
     schema: str = typer.Option("project_entry", "--schema"),
     style_from: list[str] = typer.Option([], "--style-from"),
     model: Optional[str] = typer.Option(None, "--model"),
     count: int = typer.Option(1, "--count"),
 ):
     settings = _settings()
+    try:
+        criteria_text = resolve_text_input(
+            criteria, criteria_file, flag_inline="--criteria", flag_file="--criteria-file"
+        )
+    except CvdocsError as exc:
+        _print_error(exc)
+        raise typer.Exit(1)
+
     store = BlockStore(settings.blocks_path)
     try:
         style_blocks = [store.load(bid) for bid in style_from] if style_from else None
@@ -102,7 +114,7 @@ def generate(
     for _ in range(count):
         try:
             _block, decision, path = generate_module.run_generate(
-                criteria, settings=settings, schema=schema, style_from=style_blocks, model_spec=model
+                criteria_text, settings=settings, schema=schema, style_from=style_blocks, model_spec=model
             )
         except CvdocsError as exc:
             _print_error(exc)
@@ -116,14 +128,25 @@ def generate(
 @app.command()
 def mutate(
     block_id: str = typer.Argument(...),
-    criteria: str = typer.Option(..., "--criteria"),
+    criteria: Optional[str] = typer.Option(None, "--criteria", help="Mutation criteria, inline."),
+    criteria_file: Optional[Path] = typer.Option(
+        None, "--criteria-file", "-f", help="Read criteria from a UTF-8 .txt/.md file."
+    ),
     model: Optional[str] = typer.Option(None, "--model"),
     in_place: bool = typer.Option(False, "--in-place"),
 ):
     settings = _settings()
     try:
+        criteria_text = resolve_text_input(
+            criteria, criteria_file, flag_inline="--criteria", flag_file="--criteria-file"
+        )
+    except CvdocsError as exc:
+        _print_error(exc)
+        raise typer.Exit(1)
+
+    try:
         _block, path = mutate_module.run_mutate(
-            block_id, criteria, settings=settings, model_spec=model, in_place=in_place
+            block_id, criteria_text, settings=settings, model_spec=model, in_place=in_place
         )
     except CvdocsError as exc:
         _print_error(exc)
@@ -133,7 +156,10 @@ def mutate(
 
 @app.command()
 def compose(
-    request: str = typer.Argument("", help="Natural-language composition request"),
+    request: str = typer.Argument("", help="Natural-language composition request, inline."),
+    request_file: Optional[Path] = typer.Option(
+        None, "--request-file", "-f", help="Read the composition request from a UTF-8 .txt/.md file."
+    ),
     use: list[str] = typer.Option([], "--use"),
     generate_: list[str] = typer.Option([], "--generate"),
     out: Optional[Path] = typer.Option(None, "--out"),
@@ -143,8 +169,16 @@ def compose(
 ):
     settings = _settings()
     try:
+        request_text = resolve_text_input(
+            request, request_file, flag_inline="the request argument", flag_file="--request-file", required=False
+        )
+    except CvdocsError as exc:
+        _print_error(exc)
+        raise typer.Exit(1)
+
+    try:
         slots, result_path = compose_module.run_compose(
-            request,
+            request_text,
             settings=settings,
             use_ids=use,
             generate_criteria=generate_,

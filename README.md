@@ -5,9 +5,6 @@ Google Doc into reusable **blocks** (flat Markdown files with YAML frontmatter),
 generate new blocks or mutate existing ones with an LLM, and composes brand-new documents
 from a natural-language request by reusing, adapting, or generating blocks as needed.
 
-This is a training project for getting hands-on with the modern local/hosted LLM ecosystem
-(OpenRouter, Ollama) — not a commercial tool.
-
 ## Requirements
 
 - Python 3.11+
@@ -107,12 +104,19 @@ cvdocs blocks list --query <text>                      # substring search over n
 cvdocs blocks show <block-id>
 
 cvdocs generate --criteria "<what you want>"           # new block from scratch
+cvdocs generate -f criteria.md                          # ...or read criteria from a file
 cvdocs mutate <block-id> --criteria "<how to change it>"  # adapt an existing block
+cvdocs mutate <block-id> -f criteria.md                  # ...or read criteria from a file
 
 cvdocs compose "<natural-language request>"            # writes output/results/<name>.md
+cvdocs compose -f request.md                            # ...or read the request from a file
 cvdocs compose "<request>" --use <block-id> --generate "<criteria>"  # pin specific slots
 cvdocs compose "<request>" --dry-run                    # show the plan, write nothing
 ```
+
+`-f`/`--criteria-file` (`generate`/`mutate`) and `-f`/`--request-file` (`compose`) read a
+UTF-8 `.txt`/`.md` file instead of an inline argument — useful for longer or multi-line
+text. Pass either the inline form or the file, never both.
 
 Every LLM-taking command accepts `--model provider:model-id` to override the configured
 default for that one call, e.g. `--model openrouter:z-ai/glm-5.3` or

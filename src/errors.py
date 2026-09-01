@@ -24,3 +24,7 @@ class BlockNotFoundError(CvdocsError):
 
 class LLMError(CvdocsError):
     """LLM provider/request failures."""
+
+
+class InputError(CvdocsError):
+    """Bad user-supplied input (e.g. conflicting or missing inline/file arguments)."""
