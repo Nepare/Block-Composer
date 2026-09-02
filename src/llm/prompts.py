@@ -1,11 +1,5 @@
-"""Prompt templates. Every LLM interaction in cvdocs works on flat Markdown or plain text
-in and out — never nested JSON for content — the one exception being compose's own plan,
-which legitimately needs structured multi-field output to describe *which* action to take
-per slot, distinct from the document content itself.
-
-Every builder here takes an optional `constraints` string (see constraints.py) — the
-content of a user-editable CLAUDE.md/AGENTS.md-style file for that tool, appended to the
-system prompt when non-empty. This is where a user says what a tool should NOT do."""
+"""Prompt templates. Every builder takes an optional `constraints` string (constraints.py),
+appended to the system prompt when non-empty."""
 
 
 def _with_constraints(system: str, constraints: str) -> str:

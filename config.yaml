@@ -1,47 +1,55 @@
-blocks_dir: output/blocks
-results_dir: output/results
-templates_path: templates.yaml
-sample_blocks_dir: input_prompts/sample_entries
-logs_dir: output/logs
+llm:
+  provider:
+    default: openrouter
 
-provider:
-  default: openrouter
+  openrouter:
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
 
-openrouter:
-  base_url: https://openrouter.ai/api/v1
-  api_key_env: OPENROUTER_API_KEY
+  ollama:
+    base_url: http://localhost:11434
 
-ollama:
-  base_url: http://localhost:11434
+  models:
+    generate: openrouter:minimax/minimax-m3:free
+    mutate: openrouter:minimax/minimax-m3:free
+    compose: openrouter:minimax/minimax-m3:free
+    naming: ollama:qwen3:1.7b
+    local_default: ollama:qwen3:4b
 
-models:
-  generate: openrouter:minimax/minimax-m3:free
-  mutate: openrouter:minimax/minimax-m3:free
-  compose: openrouter:minimax/minimax-m3:free
-  naming: ollama:qwen3:1.7b
-  local_default: ollama:qwen3:4b
+path:
+  blocks_dir: output/blocks
+  results_dir: output/results
+  templates_path: templates.yaml
+  sample_blocks_dir: input_prompts/sample_entries
+  logs_dir: output/logs
 
-google:
-  scopes:
-    - https://www.googleapis.com/auth/documents.readonly
-  credentials_path: credentials/credentials.json
-  token_path: credentials/token.json
-  web_client_id_env: GOOGLE_WEB_CLIENT_ID
-  web_client_secret_env: GOOGLE_WEB_CLIENT_SECRET
-  web_redirect_uri: http://localhost:8000/auth/google/callback
+  storage:
+    backend: filesystem
+    sqlite_path: output/cvdocs.db
 
-web_service:
-  api_key_env: CVDOCS_API_KEY
+  constraints:
+    generate: input_prompts/constraints/GENERATE_CONSTRAINTS.md
+    naming: input_prompts/constraints/NAMING_CONSTRAINTS.md
+    mutate: input_prompts/constraints/MUTATE_CONSTRAINTS.md
+    compose: input_prompts/constraints/COMPOSE_CONSTRAINTS.md
 
-constraints:
-  generate: input_prompts/constraints/GENERATE_CONSTRAINTS.md
-  naming: input_prompts/constraints/NAMING_CONSTRAINTS.md
-  mutate: input_prompts/constraints/MUTATE_CONSTRAINTS.md
-  compose: input_prompts/constraints/COMPOSE_CONSTRAINTS.md
+behavior:
+  compose:
+    keyword_search_min_blocks: 5 # min number of blocks in the library to trigger keyword search
+    keyword_search_top_n: 12 # number of most relevant blocks to consider
+    keyword_search_unmatched_reserve: 2 # number of unmatched blocks to reserve (near keyword score miss)
+    keywords_per_category_min: 0
+    keywords_per_category_max: 10 # range of generated keywords per category when processing a request
 
-compose:
-  keyword_search_min_blocks: 5 # min number of blocks in the library to trigger keyword search
-  keyword_search_top_n: 12 # number of most relevant blocks to consider
-  keyword_search_unmatched_reserve: 2 # number of unmatched blocks to reserve (near keyword score miss)
-  keywords_per_category_min: 0
-  keywords_per_category_max: 10 # range of generated keywords per category when processing a request
+auth:
+  google:
+    scopes:
+      - https://www.googleapis.com/auth/documents.readonly
+    credentials_path: credentials/credentials.json
+    token_path: credentials/token.json
+    web_client_id_env: GOOGLE_WEB_CLIENT_ID
+    web_client_secret_env: GOOGLE_WEB_CLIENT_SECRET
+    web_redirect_uri: http://localhost:8000/auth/google/callback
+
+  web_service:
+    api_key_env: CVDOCS_API_KEY

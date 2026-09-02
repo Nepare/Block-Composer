@@ -5,7 +5,7 @@ import pytest
 from typer.testing import CliRunner
 
 import cli
-from config import Settings
+from core.config import Settings
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -17,9 +17,9 @@ def cli_settings(tmp_path, monkeypatch):
     """Points cli._settings() at a scratch Settings instance instead of the real
     config.yaml/output dirs, and hands the instance back for assertions."""
     s = Settings()
-    s.blocks_dir = str(tmp_path / "blocks")
-    s.results_dir = str(tmp_path / "results")
-    s.templates_path = str(PROJECT_ROOT / "templates.yaml")
+    s.path.blocks_dir = str(tmp_path / "blocks")
+    s.path.results_dir = str(tmp_path / "results")
+    s.path.templates_path = str(PROJECT_ROOT / "templates.yaml")
     monkeypatch.setattr(cli, "_settings", lambda: s)
     return s
 

@@ -1,0 +1,156 @@
+import os
+from pathlib import Path
+from typing import Any, Literal
+
+import yaml
+from dotenv import load_dotenv
+from pydantic import BaseModel, Field
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+class OpenRouterConfig(BaseModel):
+    base_url: str = "https://openrouter.ai/api/v1"
+    api_key_env: str = "OPENROUTER_API_KEY"
+
+    @property
+    def api_key(self) -> str:
+        return os.environ.get(self.api_key_env, "")
+
+
+class OllamaConfig(BaseModel):
+    base_url: str = "http://localhost:11434"
+
+
+class ProviderConfig(BaseModel):
+    default: str = "openrouter"
+
+
+class ModelsConfig(BaseModel):
+    # Defaults only apply if config.yaml is missing entirely — it's the actual source of truth.
+    generate: str = "openrouter:minimax/minimax-m3:free"
+    mutate: str = "openrouter:minimax/minimax-m3:free"
+    compose: str = "openrouter:minimax/minimax-m3:free"
+    naming: str = "openrouter:minimax/minimax-m3:free"
+    local_default: str = "ollama:qwen3-coder-next"
+
+
+class GoogleConfig(BaseModel):
+    scopes: list[str] = Field(
+        default_factory=lambda: ["https://www.googleapis.com/auth/documents.readonly"]
+    )
+    credentials_path: str = "credentials/credentials.json"
+    token_path: str = "credentials/token.json"
+    # Hosted-mode (WebAuthProvider) OAuth client — env var names, never the secrets.
+    web_client_id_env: str = "GOOGLE_WEB_CLIENT_ID"
+    web_client_secret_env: str = "GOOGLE_WEB_CLIENT_SECRET"
+    web_redirect_uri: str = "http://localhost:8000/auth/google/callback"
+
+
+class WebServiceConfig(BaseModel):
+    api_key_env: str = "CVDOCS_API_KEY"
+
+
+class PromptConstraintsConfig(BaseModel):
+    """Paths to per-tool constraint files, appended to that tool's system prompt on every
+    call; a missing file is treated as no constraints, not an error."""
+
+    generate: str = "input_prompts/constraints/GENERATE_CONSTRAINTS.md"
+    naming: str = "input_prompts/constraints/NAMING_CONSTRAINTS.md"
+    mutate: str = "input_prompts/constraints/MUTATE_CONSTRAINTS.md"
+    compose: str = "input_prompts/constraints/COMPOSE_CONSTRAINTS.md"
+
+
+class ComposeConfig(BaseModel):
+    """Below keyword_search_min_blocks, compose narrows nothing; at or above it, narrows to
+    keyword-matched blocks (see compose.py::_select_candidate_blocks)."""
+
+    keyword_search_min_blocks: int = 5
+    keyword_search_top_n: int = 12
+    keyword_search_unmatched_reserve: int = 2  # fixed, not proportional to top_n
+    keywords_per_category_min: int = 0
+    keywords_per_category_max: int = 4  # hard-truncates; min isn't enforced
+
+
+class StorageConfig(BaseModel):
+    """Picks the block/result storage backend via storage/router.py's dispatch; overridable
+    by the CVDOCS_STORAGE_BACKEND env var (see load_settings)."""
+
+    backend: Literal["filesystem", "sqlite"] = "filesystem"
+    sqlite_path: str = "output/cvdocs.db"
+
+
+class LLMConfig(BaseModel):
+    provider: ProviderConfig = Field(default_factory=ProviderConfig)
+    openrouter: OpenRouterConfig = Field(default_factory=OpenRouterConfig)
+    ollama: OllamaConfig = Field(default_factory=OllamaConfig)
+    models: ModelsConfig = Field(default_factory=ModelsConfig)
+
+
+class PathConfig(BaseModel):
+    blocks_dir: str = "output/blocks"
+    results_dir: str = "output/results"
+    templates_path: str = "templates.yaml"
+    sample_blocks_dir: str = "input_prompts/sample_entries"
+    logs_dir: str = "output/logs"
+    storage: StorageConfig = Field(default_factory=StorageConfig)
+    constraints: PromptConstraintsConfig = Field(default_factory=PromptConstraintsConfig)
+
+
+class BehaviorConfig(BaseModel):
+    compose: ComposeConfig = Field(default_factory=ComposeConfig)
+
+
+class AuthConfig(BaseModel):
+    google: GoogleConfig = Field(default_factory=GoogleConfig)
+    web_service: WebServiceConfig = Field(default_factory=WebServiceConfig)
+
+
+class Settings(BaseModel):
+    llm: LLMConfig = Field(default_factory=LLMConfig)
+    path: PathConfig = Field(default_factory=PathConfig)
+    behavior: BehaviorConfig = Field(default_factory=BehaviorConfig)
+    auth: AuthConfig = Field(default_factory=AuthConfig)
+
+    def resolve(self, relative: str | Path) -> Path:
+        p = Path(relative)
+        return p if p.is_absolute() else (PROJECT_ROOT / p)
+
+    @property
+    def blocks_path(self) -> Path:
+        return self.resolve(self.path.blocks_dir)
+
+    @property
+    def results_path(self) -> Path:
+        return self.resolve(self.path.results_dir)
+
+    @property
+    def templates_file(self) -> Path:
+        return self.resolve(self.path.templates_path)
+
+    @property
+    def sample_blocks_path(self) -> Path:
+        return self.resolve(self.path.sample_blocks_dir)
+
+    @property
+    def logs_path(self) -> Path:
+        return self.resolve(self.path.logs_dir)
+
+    @property
+    def storage_db_path(self) -> Path:
+        return self.resolve(self.path.storage.sqlite_path)
+
+
+def load_settings(config_path: Path | str | None = None) -> Settings:
+    """CLI flag > env > .env > config.yaml > defaults. CVDOCS_STORAGE_BACKEND is the one
+    setting allowed to come from the environment (a deployment fact, not a preference)."""
+    load_dotenv(PROJECT_ROOT / ".env")
+    path = Path(config_path) if config_path else PROJECT_ROOT / "config.yaml"
+    data: dict[str, Any] = {}
+    if path.exists():
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    settings = Settings.model_validate(data)
+    env_backend = os.environ.get("CVDOCS_STORAGE_BACKEND")
+    if env_backend:
+        settings.path.storage.backend = env_backend
+    return settings

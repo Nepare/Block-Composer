@@ -23,7 +23,7 @@ dev = ["pytest", "pytest-mock", "ruff", "httpx"]
 
 [project.scripts]
 cvdocs = "cli:app"
-cvdocs-web = "webapp:main"
+cvdocs-web = "web.webapp:main"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -31,27 +31,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-py-modules = [
-    "cli",
-    "config",
-    "docs_api",
-    "templates",
-    "blocks",
-    "naming",
-    "constraints",
-    "dissect",
-    "generate",
-    "mutate",
-    "compose",
-    "errors",
-    "webapp",
-    "block_fields",
-    "progress",
-    "retrieval",
-    "text_input",
-    "web_jobs",
-]
-packages = ["parsing", "llm", "llm.providers", "auth", "storage"]
+py-modules = ["cli"]
+packages = ["parsing", "llm", "llm.providers", "auth", "storage", "core", "tools", "models", "web"]
 
 [tool.ruff]
 line-length = 100

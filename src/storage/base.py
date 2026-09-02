@@ -1,11 +1,5 @@
-"""Storage Protocols — the pluggable persistence boundary for blocks and compose results.
-`FilesystemBlockStorage`/`FilesystemResultStorage` (storage/filesystem.py) are today's
-only implementations; a future DB-backed pair implements the same shape (see
-storage/router.py's dispatch). naming.py needs zero changes for any of this — its
-decide()/unique_stem() already only consume plain in-memory Candidate data and an
-injected `exists` callable (see storage/filesystem.py's save_with_dedup for how a backend
-supplies both).
-"""
+"""Storage Protocols — the pluggable persistence boundary for blocks and compose results
+(see storage/router.py's dispatch)."""
 
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -14,21 +8,15 @@ from typing import Protocol
 
 from google.oauth2.credentials import Credentials
 
-from blocks import Block
-from naming import Candidate, NamingDecision
-from progress import ProgressEvent
+from models.blocks import Block
+from core.naming import Candidate, NamingDecision
+from core.progress import ProgressEvent
 
 
 @dataclass
 class Result:
-    """A saved compose result. Richer than what the filesystem backend actually persists
-    today (see FilesystemResultStorage's docstring) — the extra fields exist now so a
-    future DB backend has somewhere to put them without another signature change later.
-
-    `slots` is a list of plain dicts (not ComposeSlot) deliberately: compose.py is a
-    *consumer* of this module, so typing this against compose.ComposeSlot would create a
-    circular import.
-    """
+    """A saved compose result. `slots` is a list of plain dicts, not ComposeSlot, to
+    avoid a circular import with compose.py."""
 
     id: str = ""
     content: str = ""

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from errors import DocsApiError
+from core.errors import DocsApiError
 
 
 @dataclass
@@ -23,10 +23,8 @@ def _cell_text(cell: dict) -> str:
 
 
 def find_blocks_table(document: dict, section_marker: str, table_columns: int) -> BlocksTable:
-    """Scan body.content for a table with `table_columns` columns whose first row is a
-    marker row: left cell text contains `section_marker`, right cell is empty. That row is
-    the section label and is dropped; every row after it is one block. Everything else in
-    the document — other tables, headings, paragraphs — is ignored."""
+    """Finds the table whose first row is a marker row (left cell contains `section_marker`,
+    right cell empty); that row is dropped, every row after it is one block."""
     body_content = document.get("body", {}).get("content", [])
     marker = section_marker.strip().lower()
 

@@ -1,12 +1,9 @@
-"""Wraps any LLMClient to emit llm_call_start/done/error ProgressEvents around chat()
-calls. Applied once at construction (llm/router.py:get_client_and_model), so no
-client.chat(...) call site anywhere in the codebase needs to change to get logging.
-"""
+"""Wraps any LLMClient to emit llm_call_start/done/error ProgressEvents around chat() calls."""
 
 import time
 
 from llm.client import LLMClient
-from progress import ProgressEvent, ProgressSink
+from core.progress import ProgressEvent, ProgressSink
 
 
 class LoggingLLMClient:

@@ -26,14 +26,56 @@ the exact dependency list — there's no separate `requirements.txt`).
 
 ## Setup
 
-You need two independent things before the CLI is usable: **Google OAuth** (for `dissect`,
-read-only) and an **OpenRouter API key** (for `generate`/`mutate`/`compose`). Neither is
-related to the other — reading a Doc has nothing to do with which LLM provider you use.
-Running as a **hosted deployment** (Docker, optional — see [section 4](#4-hosted-deployment-optional--docker))
-needs its own, separate Google OAuth client plus one more secret; local CLI use never
-touches those.
+OpenRouter and/or Ollama are needed regardless of how you run this. Then pick the Google OAuth
+setup matching your deployment mode: local CLI use and the hosted Docker deployment each need
+their own, independent Google OAuth client — set up whichever one applies to you, not both.
 
-### 1. Google Cloud OAuth (for `dissect`)
+### 1. OpenRouter (for `generate`/`mutate`/`compose`)
+
+1. Sign up at [openrouter.ai](https://openrouter.ai) (Google/GitHub/email, no card needed).
+2. Go to [openrouter.ai/keys](https://openrouter.ai/keys) → **Create Key** → copy it
+   (starts with `sk-or-v1-...`).
+3. Copy `.env.example` to `.env` (gitignored) and set:
+   ```
+   OPENROUTER_API_KEY=sk-or-v1-...
+   ```
+
+That's it — the model this project defaults to (`minimax/minimax-m3:free`) costs $0 to
+call; the key just identifies you for OpenRouter's free-tier rate limits (20 requests/min,
+50/day until you've ever spent $10 on the platform, then 1000/day).
+
+### 2. Ollama (optional, for the cheaper local tasks)
+
+`config.yaml` routes the cheap block/variant-naming task to a local model by default. If
+you don't want to install Ollama, just point it back at OpenRouter instead:
+
+```yaml
+llm:
+  models:
+    naming: openrouter:minimax/minimax-m3:free
+```
+
+To use it as shipped:
+1. Install from [ollama.com](https://ollama.com) (or `winget install Ollama.Ollama` on
+   Windows) and make sure `ollama serve` is running (the installer starts it automatically).
+2. `ollama pull qwen3:1.7b`
+
+No dedicated GPU is required — this is a small model that runs fine on CPU.
+
+### 3. Google OAuth setup
+
+`cvdocs` needs one Google OAuth connection to read Docs for `dissect`, but which *kind* of
+connection depends on how you run it — set up whichever one matches:
+
+- **3.1 Local CLI** — you're running `cvdocs` directly on your own machine. Simplest path:
+  a one-time browser popup handles sign-in, and only you ever use this connection. Pick this
+  unless you specifically need the hosted deployment.
+- **3.2 Hosted deployment** — you're running `cvdocs` as a Docker container, e.g. to serve
+  the HTTP API to others or from a server with no local browser to pop a window on. Needs a
+  browser-based OAuth flow instead, plus a shared authorization credential gating who can
+  trigger it.
+
+#### 3.1 Local CLI (for `dissect`)
 
 1. Go to [console.cloud.google.com](https://console.cloud.google.com) and create a new
    project (any name).
@@ -64,89 +106,45 @@ brand verification (showing a custom name/logo to strangers), which a personal T
 app never needs. Any live URL works — a GitHub repo page for this project is a normal
 choice if you push it there.
 
-### 2. OpenRouter (for `generate`/`mutate`/`compose`)
+#### 3.2 Hosted deployment (Docker)
 
-1. Sign up at [openrouter.ai](https://openrouter.ai) (Google/GitHub/email, no card needed).
-2. Go to [openrouter.ai/keys](https://openrouter.ai/keys) → **Create Key** → copy it
-   (starts with `sk-or-v1-...`).
-3. Copy `.env.example` to `.env` (gitignored) and set:
-   ```
-   OPENROUTER_API_KEY=sk-or-v1-...
-   ```
-
-That's it — the model this project defaults to (`minimax/minimax-m3:free`) costs $0 to
-call; the key just identifies you for OpenRouter's free-tier rate limits (20 requests/min,
-50/day until you've ever spent $10 on the platform, then 1000/day).
-
-### 3. Ollama (optional, for the local `naming` task)
-
-`config.yaml` routes the cheap block/variant-naming task to a local model by default. If
-you don't want to install Ollama, just point it back at OpenRouter instead:
-
-```yaml
-models:
-  naming: openrouter:minimax/minimax-m3:free
-```
-
-To use it as shipped:
-1. Install from [ollama.com](https://ollama.com) (or `winget install Ollama.Ollama` on
-   Windows) and make sure `ollama serve` is running (the installer starts it automatically).
-2. `ollama pull qwen3:1.7b`
-
-No dedicated GPU is required — this is a small model that runs fine on CPU.
-
-### 4. Hosted deployment (optional — Docker)
-
-Running `cvdocs` as a Docker container (`storage.backend: sqlite`) uses a *different*
+Running `cvdocs` as a Docker container (`path.storage.backend: sqlite`) uses a *different*
 Google connection method than the local CLI — a browser-based OAuth flow served over HTTP,
 since there's no local machine for a browser popup to talk to. This needs its own Google
-OAuth client (a **Web application** client, not the Desktop-app one from section 1) plus a
-secret of its own:
+OAuth client (a **Web application** client, not the Desktop-app one from 3.1) plus a secret
+of its own:
 
-1. In the same Google Cloud project as section 1, go to **APIs & Services → Credentials**
+1. In the same Google Cloud project as 3.1, go to **APIs & Services → Credentials**
    → **Create Credentials → OAuth client ID** → Application type **Web application**.
    Under **Authorized redirect URIs**, add `http://localhost:8000/auth/google/callback`
-   (or whatever `google.web_redirect_uri` is set to in `config.yaml`, if you change the
+   (or whatever `auth.google.web_redirect_uri` is set to in `config.yaml`, if you change the
    port/host). Create, then copy the **Client ID** and **Client secret**.
 2. Pick a long, random value for the shared authorization credential that gates the
    sign-in link (e.g. `openssl rand -hex 32`) — this is what stops a stranger who finds the
    URL from starting a connection attempt against your deployment.
 3. Copy `.env.example` to `.env` and fill in `GOOGLE_WEB_CLIENT_ID`,
    `GOOGLE_WEB_CLIENT_SECRET`, and `CVDOCS_API_KEY` (the value from step 2), alongside
-   `OPENROUTER_API_KEY` from section 2.
+   `OPENROUTER_API_KEY` from section 1.
 4. `docker compose up --build`, then visit
    `http://localhost:8000/auth/google/login?key=<your CVDOCS_API_KEY>` in a browser to
    connect. `docker compose exec app cvdocs auth status` confirms it from inside the
    container.
 
 This is a single shared connection for the whole deployment (not one per visiting user),
-and is entirely independent of the local CLI's own connection from section 1 — connecting
-one doesn't connect the other.
-
-#### Running `generate`/`mutate` over HTTP
-
-Once the service is running, `generate` and `mutate` are also reachable over HTTP, gated by
-the same `?key=<CVDOCS_API_KEY>` credential as `/auth/google/login`:
-
-- `POST /generate/start` / `POST /mutate/start` — same inputs as the CLI's `generate`/`mutate`
-  commands (JSON body), return `{"job_id": "..."}` immediately rather than blocking until the
-  LLM call finishes.
-- `GET /generate/stream/{job_id}` / `GET /mutate/stream/{job_id}` — a Server-Sent Events stream
-  of that run's progress, ending in one final `event: complete` line with the outcome (the
-  produced block's id, or an error). Reconnecting after a run has already finished still
-  replays its full history. Neither tool has a cancel endpoint — each is a single short LLM
-  call chain, not worth interrupting mid-flight.
-
-```
-curl -X POST "http://localhost:8000/generate/start?key=<CVDOCS_API_KEY>" \
-     -H "Content-Type: application/json" \
-     -d '{"criteria": "a small lighthouse keeper role"}'
-# -> {"job_id": "<id>"}
-
-curl -N "http://localhost:8000/generate/stream/<id>?key=<CVDOCS_API_KEY>"
-```
+and is entirely independent of the local CLI's own connection from 3.1 — connecting one
+doesn't connect the other.
 
 ## Usage
+
+### Web UI
+
+Not built yet — there is no frontend code in this repository today; the HTTP API below is 
+what a future web UI will call into.
+
+### CLI
+
+Requires Setup 1 (OpenRouter) and Setup 3.1 (Google OAuth, local CLI); Setup 2 (Ollama) only
+matters if you're using the default local `naming` model.
 
 ```
 cvdocs auth login                                    # once
@@ -176,30 +174,59 @@ Every LLM-taking command accepts `--model provider:model-id` to override the con
 default for that one call, e.g. `--model openrouter:z-ai/glm-5.3` or
 `--model ollama:qwen3:4b`.
 
+### HTTP
+
+Requires the hosted deployment from [Setup 3.2](#32-hosted-deployment-docker)
+(Docker, Web OAuth client, `CVDOCS_API_KEY`).
+
+Once the service is running, `generate` and `mutate` are reachable over HTTP, gated by the
+same `?key=<CVDOCS_API_KEY>` credential as `/auth/google/login`:
+
+- `POST /generate/start` / `POST /mutate/start` — same inputs as the CLI's `generate`/`mutate`
+  commands (JSON body), return `{"job_id": "..."}` immediately rather than blocking until the
+  LLM call finishes.
+- `GET /generate/stream/{job_id}` / `GET /mutate/stream/{job_id}` — a Server-Sent Events stream
+  of that run's progress, ending in one final `event: complete` line with the outcome (the
+  produced block's id, or an error). Reconnecting after a run has already finished still
+  replays its full history. Neither tool has a cancel endpoint — each is a single short LLM
+  call chain, not worth interrupting mid-flight.
+
+```
+curl -X POST "http://localhost:8000/generate/start?key=<CVDOCS_API_KEY>" \
+     -H "Content-Type: application/json" \
+     -d '{"criteria": "a small lighthouse keeper role"}'
+# -> {"job_id": "<id>"}
+
+curl -N "http://localhost:8000/generate/stream/<id>?key=<CVDOCS_API_KEY>"
+```
+
 ## Configuration
 
-`config.yaml` (committed — no secrets live in it) controls:
+`config.yaml` (committed — no secrets live in it) is grouped into four sections:
 
-- `blocks_dir` / `results_dir` — default `output/blocks`, `output/results`
-- `templates_path` — see `templates.yaml`, which declares the shape of a "block" inside a
-  source Doc (the marker row, which column is which, field-label conventions). Dissection
-  is fully deterministic against a doc matching that shape — no LLM calls at all.
-- `models.*` — which `provider:model-id` handles each task (`generate`, `mutate`,
-  `compose`, `naming`). Mix and match freely — e.g. push the expensive planning work to a
-  strong hosted model while keeping cheap tasks fully local and free.
-- `sample_blocks_dir` — default `input_prompts/sample_entries`, the fallback style
-  examples `generate` learns from when the block library is still empty.
-- `constraints.*` — paths to the `input_prompts/constraints/*.md` files (see below).
-- `google.web_client_id_env` / `google.web_client_secret_env` / `google.web_redirect_uri` —
-  hosted-deployment-only (see [section 4](#4-hosted-deployment-optional--docker)); the first
-  two name env vars, never hold secrets themselves.
-- `web_service.api_key_env` — names the env var holding the hosted deployment's shared
-  authorization credential (see section 4). Also hosted-only.
+- `llm.*` — which `provider:model-id` handles each task (`llm.models.generate`, `.mutate`,
+  `.compose`, `.naming`), plus provider connection settings (`llm.openrouter.*`,
+  `llm.ollama.*`). Mix and match freely — e.g. push the expensive planning work to a strong
+  hosted model while keeping cheap tasks fully local and free.
+- `path.*` — filesystem locations: `path.blocks_dir` / `path.results_dir` (default
+  `output/blocks`, `output/results`), `path.templates_path` (see `templates.yaml`, which
+  declares the shape of a "block" inside a source Doc — dissection is fully deterministic
+  against a doc matching that shape, no LLM calls at all), `path.sample_blocks_dir` (the
+  fallback style examples `generate` learns from when the library is still empty),
+  `path.storage.*` (which storage backend, and its DB path), and `path.constraints.*` (paths
+  to the `input_prompts/constraints/*.md` files, see below).
+- `behavior.compose.*` — compose's own tuning knobs (candidate-narrowing thresholds, keyword
+  counts).
+- `auth.*` — `auth.google.web_client_id_env` / `.web_client_secret_env` / `.web_redirect_uri`
+  (hosted-deployment-only, see [Setup 3.2](#32-hosted-deployment-docker);
+  the first two name env vars, never hold secrets themselves) and
+  `auth.web_service.api_key_env` (names the env var holding the hosted deployment's shared
+  authorization credential, also hosted-only).
 
 Secrets never live in `config.yaml` — only the *names* of the env vars that hold them do.
 They live in a gitignored `.env` instead: `OPENROUTER_API_KEY` always; `GOOGLE_WEB_CLIENT_ID`,
 `GOOGLE_WEB_CLIENT_SECRET`, and `CVDOCS_API_KEY` only if you're running the hosted deployment
-(section 4). See `.env.example` for the full list.
+(Setup 3.2). See `.env.example` for the full list.
 
 ## `input_prompts/constraints/`
 

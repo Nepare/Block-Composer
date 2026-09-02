@@ -1,6 +1,6 @@
 from openai import OpenAI
 
-from errors import LLMError
+from core.errors import LLMError
 
 
 class OpenRouterClient:
@@ -29,12 +29,8 @@ class OpenRouterClient:
                 "but still needs a key from https://openrouter.ai/keys."
             )
 
-        # A free/auto-routed model can land on a different underlying provider each call.
-        # Two distinct failure modes are worth one extra attempt each, since a retry often
-        # lands somewhere that behaves: (a) a "reasoning" model burning max_tokens on
-        # invisible thinking and returning nothing, and (b) OpenRouter passing an upstream
-        # error (rate limit, provider outage) through as an HTTP 200 with `choices: null`
-        # instead of raising — the SDK never sees this as an exception at all.
+        # One retry: a free/auto-routed model can land on a different provider each call,
+        # and OpenRouter sometimes returns choices: null with HTTP 200 instead of raising.
         last_error_detail = None
         for attempt in range(2):
             try:

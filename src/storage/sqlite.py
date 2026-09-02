@@ -1,16 +1,7 @@
-"""SQLite-backed implementations of BlockStorage/ResultStorage (storage/base.py) — the
-Docker/web deployment backend. Written directly against `sqlite3` (stdlib), not an ORM:
-the Protocol is what buys future Postgres portability, not SQLAlchemy, and a hand-written
-layer is proportionate for a two-table schema.
-
-Connections use `isolation_level=None` (autocommit) so each class manages transactions
-explicitly rather than relying on sqlite3's implicit-transaction default — `save()` wraps
-its own single write in BEGIN/COMMIT, `save_with_dedup()` wraps the whole exists-check ->
-naming.decide() -> insert sequence in one BEGIN IMMEDIATE/COMMIT (via a private `_insert()`
-helper with no commit of its own, reused by both, so the transaction boundary is only ever
-set by the outermost caller) — this is what makes the check-then-act dedup race atomic
-under concurrent web requests, unlike the filesystem backend.
-"""
+"""SQLite-backed BlockStorage/ResultStorage (storage/base.py) — the Docker/web deployment
+backend (stdlib `sqlite3`, no ORM). `save_with_dedup()` wraps its whole exists-check ->
+naming.decide() -> insert sequence in one BEGIN IMMEDIATE/COMMIT, making the dedup race
+atomic under concurrent requests."""
 
 import json
 import secrets
@@ -20,9 +11,9 @@ from pathlib import Path
 
 from google.oauth2.credentials import Credentials
 
-import naming
-from blocks import Block
-from errors import BlockNotFoundError
+from core import naming
+from models.blocks import Block
+from core.errors import BlockNotFoundError
 from storage.base import Result
 
 DEFAULT_USER_ID = "default"
@@ -140,10 +131,8 @@ class SqliteBlockStorage:
         tags: list[str] | None = None,
         source: str | None = None,
     ) -> list[Block]:
-        # Same "load all, filter in Python" approach as FilesystemBlockStorage.search --
-        # deliberately not pushed into SQL yet; a real UI's query patterns aren't known,
-        # and hand-writing JSON-array tag queries prematurely is exactly the
-        # over-normalizing this phase avoids.
+        # Same "load all, filter in Python" approach as the filesystem backend — not
+        # pushed into SQL yet.
         results = self.all()
         if tags:
             wanted = {t.lower() for t in tags}
@@ -229,7 +218,7 @@ class SqliteResultStorage:
             use_ids=json.loads(row["use_ids"]),
             generate_criteria=json.loads(row["generate_criteria"]),
             slots=json.loads(row["slots"]),
-            progress_log=[],  # not populated by any caller yet -- see storage/sqlite.py docstring
+            progress_log=[],  # not populated by any caller yet
             created_at=datetime.fromisoformat(row["created_at"]) if row["created_at"] else None,
         )
 
@@ -253,7 +242,7 @@ class SqliteResultStorage:
                 json.dumps(result.use_ids),
                 json.dumps(result.generate_criteria),
                 json.dumps(result.slots),
-                json.dumps([]),  # progress_log: always empty for now, see class docstring
+                json.dumps([]),  # progress_log isn't populated by any caller yet
                 (result.created_at or datetime.now(timezone.utc)).isoformat(),
             ),
         )
@@ -302,10 +291,8 @@ class SqliteResultStorage:
         naming_model: str,
         naming_constraints: str = "",
     ) -> tuple[naming.NamingDecision, str | None]:
-        """Same name-reuse twist as FilesystemResultStorage.save_with_dedup (see its
-        docstring) -- a Result's `name` isn't recoverable independent of the row that
-        already stores it, but staying consistent with the filesystem backend's exact
-        matching semantics matters more than using the (also-correct) stored name here."""
+        """Same dedup shape as the filesystem backend's Result version — compares by
+        content since a Result's name isn't independently recoverable."""
         base_slug = naming.slugify(result.name)
         self._conn.execute("BEGIN IMMEDIATE")
         try:

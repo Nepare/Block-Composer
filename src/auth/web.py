@@ -4,8 +4,8 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 
-from config import Settings
-from errors import AuthError
+from core.config import Settings
+from core.errors import AuthError
 from storage.base import CredentialsStorage
 
 
@@ -40,20 +40,20 @@ class WebAuthProvider:
         return flow.credentials
 
     def _flow(self, code_verifier: str) -> Flow:
-        client_id = os.environ.get(self.settings.google.web_client_id_env, "")
-        client_secret = os.environ.get(self.settings.google.web_client_secret_env, "")
+        client_id = os.environ.get(self.settings.auth.google.web_client_id_env, "")
+        client_secret = os.environ.get(self.settings.auth.google.web_client_secret_env, "")
         client_config = {
             "web": {
                 "client_id": client_id,
                 "client_secret": client_secret,
                 "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                 "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": [self.settings.google.web_redirect_uri],
+                "redirect_uris": [self.settings.auth.google.web_redirect_uri],
             }
         }
         return Flow.from_client_config(
             client_config,
-            scopes=self.settings.google.scopes,
-            redirect_uri=self.settings.google.web_redirect_uri,
+            scopes=self.settings.auth.google.scopes,
+            redirect_uri=self.settings.auth.google.web_redirect_uri,
             code_verifier=code_verifier,
         )

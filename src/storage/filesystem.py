@@ -1,18 +1,15 @@
-"""Filesystem-backed implementations of BlockStorage/ResultStorage (storage/base.py) —
-flat Markdown files, the CLI/local default. `BlockStore` lived in blocks.py before the
-storage Protocol existed; this is that same class, moved and adapted to the Protocol's
-`save`/`save_with_dedup` returning a stem (str) instead of a Path — a DB backend has no
-filesystem path to hand back, so the Protocol can't be Path-shaped.
-"""
+"""Filesystem-backed BlockStorage/ResultStorage (storage/base.py) — flat Markdown files,
+the CLI/local default; save()/save_with_dedup() return a stem, not a Path, since other
+backends have none to give."""
 
 from pathlib import Path
 
 import frontmatter
 from google.oauth2.credentials import Credentials
 
-import naming
-from blocks import Block
-from errors import BlockNotFoundError
+from core import naming
+from models.blocks import Block
+from core.errors import BlockNotFoundError
 from storage.base import Result
 
 
@@ -82,9 +79,8 @@ class FilesystemBlockStorage:
         naming_model: str,
         naming_constraints: str = "",
     ) -> tuple[naming.NamingDecision, str | None]:
-        """The shared dissect/generate entry point: brand-new name -> saved immediately, no
-        LLM call; exact duplicate of an existing block -> skipped; partial match -> one
-        cheap-model call to produce a variant name (see naming.decide)."""
+        """Brand-new name saves immediately; an exact duplicate is skipped; a partial match
+        gets a cheap-model variant name (see naming.decide)."""
         base_slug = naming.slugify(block.name)
         existing = [(b.id, b.to_candidate()) for b in self.siblings(base_slug)]
         decision = naming.decide(
@@ -102,14 +98,9 @@ class FilesystemBlockStorage:
 
 
 class FilesystemResultStorage:
-    """Loads/saves/searches compose Result files, structurally identical to
-    FilesystemBlockStorage but for `output/results/`. Only `content` round-trips through
-    the plain-text `.md` file — no frontmatter, matching the pre-Phase-2 format exactly
-    (`_save_result` used to write raw content with no metadata header) so this refactor
-    changes zero on-disk bytes. Result's richer fields (request/use_ids/slots/
-    progress_log) are accepted by `save`/`save_with_dedup` but not persisted here; a
-    future DB-backed ResultStorage is where that metadata actually gets stored.
-    """
+    """Loads/saves/searches compose Result files as plain-text `.md` under
+    `output/results/` — only `content` persists; `request`/`use_ids`/`slots`/
+    `progress_log` are accepted by `save`/`save_with_dedup` but not stored here."""
 
     def __init__(self, root: Path | str):
         self.root = Path(root)
@@ -159,14 +150,9 @@ class FilesystemResultStorage:
         naming_model: str,
         naming_constraints: str = "",
     ) -> tuple[naming.NamingDecision, str | None]:
-        """Same dedup shape as FilesystemBlockStorage.save_with_dedup, with one twist:
-        unlike a Block (whose `.name` is always recoverable from its own body heading),
-        a plain-text result file has no persisted title at all — only its slugified
-        filename stem survives. So every existing sibling's comparison candidate reuses
-        the *new* result's own `name` rather than trying to recover one that was never
-        saved; the dedup decision then hinges on content (full_text) equality alone,
-        which is what actually distinguishes "a rerun of the same compose" here.
-        """
+        """Same dedup shape as the Block version, but a result file has no persisted
+        title, so every sibling candidate reuses the new result's own `name` and the
+        dedup decision hinges on content equality alone."""
         base_slug = naming.slugify(result.name)
         existing = [
             (sibling.id, naming.Candidate(name=result.name, full_text=sibling.content))
@@ -187,10 +173,9 @@ class FilesystemResultStorage:
 
 
 class FilesystemCredentialsStorage:
-    """Wraps the token.json read/write today's src/auth.py did directly — same file,
-    same `Credentials.from_authorized_user_file`/`to_json` round-trip, just behind the
-    CredentialsStorage Protocol so InstalledAppAuthProvider doesn't touch token_path
-    itself."""
+    """Persists Credentials as token.json via
+    `Credentials.from_authorized_user_file`/`to_json`, behind the CredentialsStorage
+    Protocol."""
 
     def __init__(self, token_path: Path | str, scopes: list[str]):
         self.token_path = Path(token_path)

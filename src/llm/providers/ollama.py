@@ -1,16 +1,12 @@
 import json
 import urllib.request
 
-from errors import LLMError
+from core.errors import LLMError
 
 
 class OllamaClient:
-    """Talks to Ollama's native /api/chat endpoint rather than its OpenAI-compatible
-    shim. Verified directly: hybrid-reasoning local models (Qwen3 included) default to
-    "thinking" mode, which can burn an entire token budget on invisible reasoning and
-    return nothing — Ollama's native API reliably suppresses this via `think: false`;
-    passing the same flag through the OpenAI-compatible endpoint via `extra_body` was
-    tested and does NOT suppress it, so that endpoint isn't usable here."""
+    """Talks to Ollama's native /api/chat endpoint — its `think: false` reliably suppresses
+    hybrid-reasoning models' invisible-thinking token burn, unlike the OpenAI-compatible shim."""
 
     def __init__(self, base_url: str = "http://localhost:11434"):
         self._base_url = base_url.rstrip("/")

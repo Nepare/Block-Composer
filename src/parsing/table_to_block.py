@@ -1,8 +1,8 @@
 import re
 from dataclasses import dataclass
 
-from blocks import Block
-from templates import BlockSchema
+from models.blocks import Block
+from models.templates import BlockSchema
 
 
 @dataclass
@@ -29,14 +29,8 @@ def named_style_bold_defaults(document: dict) -> dict[str, bool]:
 
 
 def _is_bold_paragraph(paragraph: dict, style_defaults: dict[str, bool]) -> bool:
-    """True if the paragraph's first substantive text run is effectively bold — resolving
-    inheritance the way Docs actually renders it, not just reading the run's own override.
-
-    Verified against two real documents with opposite conventions: one where HEADING_2
-    defaults to non-bold and labels explicitly set bold:true (values carry no override),
-    and one where HEADING_2 defaults to bold and labels carry NO override at all (values
-    explicitly set bold:false). Reading only the run's own textStyle.bold — ignoring the
-    named style's default — misreads one of the two as "nothing is ever bold"."""
+    """True if the paragraph's first substantive text run is effectively bold, resolved
+    against the named style's default rather than only the run's own override."""
     named_style = paragraph.get("paragraphStyle", {}).get("namedStyleType", "NORMAL_TEXT")
     default_bold = style_defaults.get(named_style, False)
     for pe in paragraph.get("elements", []):
@@ -48,10 +42,7 @@ def _is_bold_paragraph(paragraph: dict, style_defaults: dict[str, bool]) -> bool
 
 
 def _iter_cell_paragraphs(content: list[dict], style_defaults: dict[str, bool]) -> list[ParaInfo]:
-    """Linear scan of a table cell's content, transparently flattening into any nested
-    table it meets — some Docs add-ons write a field's label+value one table deeper than
-    the rest (e.g. a computed "Environment" total), and a nested table's own children are
-    just more of the same paragraph stream, not a special case."""
+    """Linear scan of a table cell's content, transparently flattening into any nested table it meets."""
     out: list[ParaInfo] = []
     for elem in content:
         paragraph = elem.get("paragraph")

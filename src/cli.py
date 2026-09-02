@@ -7,16 +7,16 @@ from rich.markup import escape
 from rich.table import Table
 from rich.tree import Tree
 
-import compose as compose_module
-import dissect as dissect_module
-import generate as generate_module
-import mutate as mutate_module
+from tools import compose as compose_module
+from tools import dissect as dissect_module
+from tools import generate as generate_module
+from tools import mutate as mutate_module
 from auth.router import get_auth_provider
-from config import load_settings
-from errors import AuthError, CvdocsError
-from progress import RichConsoleSink
+from core.config import load_settings
+from core.errors import AuthError, CvdocsError
+from core.progress import RichConsoleSink
 from storage.router import get_block_storage
-from text_input import resolve_text_input
+from core.text_input import resolve_text_input
 
 app = typer.Typer(add_completion=False, help="cvdocs — a configurable block library and composer.")
 auth_app = typer.Typer(help="Google OAuth login/status.")
@@ -32,9 +32,7 @@ def _settings():
 
 
 def _print_error(exc: Exception) -> None:
-    # Rich treats [...] as markup, and our own bracket-variant filenames
-    # (e.g. "police_station [jail].md") show up in error text constantly — escape() is
-    # what stops that from being silently swallowed instead of printed.
+    # Rich treats [...] as markup, which bracket-variant filenames trigger — escape() first.
     console.print(f"[red]{escape(str(exc))}[/red]")
 
 
@@ -234,10 +232,6 @@ def compose(
     elif result_path:
         console.print(f"[green]Written[/green] {escape(str(result_path))}")
     else:
-        # A non-filesystem backend (e.g. sqlite) has no path to show, so a successful
-        # save also returns None here -- same as a cancelled run does. The CLI has no way
-        # to trigger cancel_check today (no flag wires it up), so that ambiguity isn't
-        # reachable yet; revisit this branch if/when a CLI cancellation trigger exists.
         console.print("[green]Saved.[/green]")
 
 

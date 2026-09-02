@@ -1,15 +1,10 @@
-import naming
-from errors import BlockNotFoundError
+from core import naming
+from core.errors import BlockNotFoundError
 
 
 class FakeBlockStorage:
-    """In-memory stand-in for BlockStorage (storage/base.py) — dict-backed, no
-    filesystem. Reuses the real naming.decide()/slugify() logic (same as
-    FilesystemBlockStorage) so dedup/variant behavior matches the real backend; only
-    where the data lives differs. Exists to prove the Protocol is complete: if a real
-    caller (run_generate/run_mutate/...) works against this with zero adaptation, the
-    Protocol captures everything callers actually need.
-    """
+    """In-memory BlockStorage — dict-backed, reuses naming.decide()/slugify() so
+    dedup/variant behavior matches the real backend."""
 
     def __init__(self):
         self._blocks: dict[str, object] = {}
@@ -71,11 +66,7 @@ class FakeBlockStorage:
 
 
 class FakeResultStorage:
-    """In-memory stand-in for ResultStorage (storage/base.py), mirroring
-    FakeBlockStorage. Reuses FilesystemResultStorage's name-reuse trick (see its
-    docstring) since a Result's `name` isn't recoverable from `content` the way a
-    Block's is from its own heading.
-    """
+    """In-memory ResultStorage, mirroring FakeBlockStorage."""
 
     def __init__(self):
         self._results: dict[str, object] = {}
@@ -135,11 +126,7 @@ class FakeResultStorage:
 
 
 class FakeLLMClient:
-    """A stand-in LLMClient that replays scripted replies in order — no network, no key.
-
-    Raises if asked for more replies than were scripted, so a test expecting N calls that
-    actually triggers N+1 fails loudly instead of silently reusing a stale reply.
-    """
+    """Replays scripted replies in order; raises if asked for more than were scripted."""
 
     def __init__(self, replies: list[str] | None = None):
         self.replies = list(replies) if replies else []

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from config import Settings
+from core.config import Settings
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -12,9 +12,9 @@ def settings(tmp_path):
     """A Settings instance pointed entirely at a scratch tmp_path — never touches the
     real output/blocks or output/results directories."""
     s = Settings()
-    s.blocks_dir = str(tmp_path / "blocks")
-    s.results_dir = str(tmp_path / "results")
-    s.templates_path = str(PROJECT_ROOT / "templates.yaml")
+    s.path.blocks_dir = str(tmp_path / "blocks")
+    s.path.results_dir = str(tmp_path / "results")
+    s.path.templates_path = str(PROJECT_ROOT / "templates.yaml")
     return s
 
 

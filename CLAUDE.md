@@ -42,18 +42,32 @@ X, then build it," not as license to skip straight to implementation. Ask as man
 
 ## Architecture map
 
+`src/` is grouped by domain — `cli.py` is the only flat file left at root, everything else
+lives under `core/`, `tools/`, `models/`, `web/`, `storage/`, `auth/`, `llm/`, `parsing/` 
+packages. `tests/` mirrors this 1:1 (plus a `unit/` bucket for
+`core/`'s own tests) — `tests/conftest.py`/`tests/fakes.py`/`tests/fixtures/`/`test_cli.py`
+stay at `tests/` root, shared across every category.
+
 - `src/cli.py` — Typer CLI, the primary interface today (`cvdocs <command>`).
-- `src/webapp.py` — FastAPI hosted-deployment service. Currently exposes only the hosted
-  Google OAuth routes (`/auth/google/login`, `/auth/google/callback`); everything else
-  (`compose`/`generate`/`mutate`/`dissect`/library) is still CLI-only. `enhancements.md`
-  describes the planned Compose/Library tabs web UI this will eventually serve.
-- `src/compose.py` / `generate.py` / `mutate.py` / `dissect.py` — the core tools. `compose.py`'s
-  `run_compose()` takes an injectable `on_progress` (`ProgressSink`, see `progress.py`) and
-  `cancel_check` callable — built for exactly this kind of long-running, observable,
-  cancellable operation, CLI or HTTP.
+- `src/web/` — FastAPI hosted-deployment service (`webapp.py`) plus its background-job/SSE
+  scaffold (`web_jobs.py`, `Job`/`start_job`/`sse_events` — generic, no cancellation support).
+  Exposes the hosted Google OAuth routes (`/auth/google/login`, `/auth/google/callback`) and
+  `generate`/`mutate`'s HTTP surface (`POST /generate/start`, `GET /generate/stream/{job_id}`,
+  same for `mutate`). `compose`'s own HTTP endpoints and `dissect`/library HTTP are not built
+  yet. No frontend code exists yet.
+- `src/tools/` — the core tools: `compose.py`, `generate.py`, `mutate.py`, `dissect.py`,
+  `retrieval.py`, `docs_api.py`. `compose.py`'s `run_compose()` takes an injectable
+  `on_progress` (`ProgressSink`, see `core/progress.py`) and `cancel_check` callable — built
+  for exactly this kind of long-running, observable, cancellable operation, CLI or HTTP.
+- `src/models/` — dataclasses/data shape: `blocks.py` (`Block`), `block_fields.py` (parses a
+  block's Markdown body into structured fields), `templates.py` (`templates.yaml`'s schema).
+- `src/core/` — cross-cutting, no single owning domain: `config.py` (`Settings`, see below),
+  `errors.py` (the `CvdocsError` hierarchy), `constraints.py`, `progress.py`
+  (`ProgressEvent`/`ProgressSink`), `text_input.py`, `naming.py` (shared dedup/slug logic used
+  by every block-writing path).
 - `src/storage/` — `Protocol`-based pluggable backends (`base.py` defines `BlockStorage` /
   `ResultStorage` / `CredentialsStorage`; `filesystem.py` and `sqlite.py` implement them;
-  `router.py` dispatches by `Settings.storage.backend`). Hosted/Docker deployments use
+  `router.py` dispatches by `Settings.path.storage.backend`). Hosted/Docker deployments use
   `sqlite`; local CLI use defaults to `filesystem`.
 - `src/auth/` — two OAuth flows behind one interface: `installed_app.py` (local CLI, browser
   popup) and `web.py` (`WebAuthProvider`, hosted deployment, redirect-based); `router.py`
@@ -61,9 +75,12 @@ X, then build it," not as license to skip straight to implementation. Ask as man
 - `src/llm/` — provider-agnostic LLM client (`router.py` dispatches `provider:model` specs to
   `providers/openrouter.py` / `providers/ollama.py`), plus `logging_client.py` for
   diagnostic `ProgressEvent`s and `prompts.py` for the actual prompt text.
-- `src/config.py` — `Settings` (pydantic), loaded from `config.yaml` + `.env`/env vars
-  (`load_settings()`). Env vars are reserved for secrets and genuine deployment-environment
-  facts only (Constitution Principle V) — not a general override mechanism.
+- `src/core/config.py` — `Settings` (pydantic), loaded from `config.yaml` + `.env`/env vars
+  (`load_settings()`), grouped into four sections: `llm` (providers/models), `path`
+  (filesystem locations, storage backend, constraint file paths), `behavior` (compose's tuning
+  knobs), `auth` (Google OAuth, hosted-deployment API key). Env vars are reserved for secrets
+  and genuine deployment-environment facts only (Constitution Principle V) — not a general
+  override mechanism.
 - `tests/fakes.py` — `FakeLLMClient`, `FakeBlockStorage`, `FakeResultStorage`; the test suite
   never makes a real network call. `tests/conftest.py`'s `settings`/`fake_router`/
   `fake_storage` fixtures are the standard way to wire fakes into a test.
@@ -72,7 +89,7 @@ X, then build it," not as license to skip straight to implementation. Ask as man
 
 - Don't write expansive comments explaining the change diffs, don't write docstrings with the same purpose. Non-trivial behavior should be explained in 1 comment line at max.
 - Never use concrete examples in comments, README or documentation. Keep the arguments and results abstract if you really need to include them into non-code natural language explanations.
-- When writing files of a similar domain, if those files are related, try placing them in a folder. For example, storage related modules are placed in the "storage" folder, .md prompts that are used for inputs are placed in the "input_prompts" folder. Try keeping it the same way.
+- When writing files of a similar domain, if those files are related, try placing them in a folder — e.g. storage backends in `storage/`, core tools in `tools/`, dataclasses in `models/`, HTTP exposure in `web/`, cross-cutting utilities in `core/`, `.md` input prompts in `input_prompts/`. Try keeping it the same way.
 
 ## Testing & verification
 
