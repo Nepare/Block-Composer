@@ -49,6 +49,7 @@ py-modules = [
     "progress",
     "retrieval",
     "text_input",
+    "web_jobs",
 ]
 packages = ["parsing", "llm", "llm.providers", "auth", "storage"]
 

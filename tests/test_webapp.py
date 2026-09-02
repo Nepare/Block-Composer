@@ -1,164 +1,378 @@
-from urllib.parse import parse_qs, urlparse
+import json
+import time
 
-import fastapi.testclient
-import pytest
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import Flow
+from fastapi.testclient import TestClient
 
-from config import Settings
-from storage.sqlite import SqliteCredentialsStorage
-
-
-@pytest.fixture
-def settings(tmp_path, monkeypatch):
-    monkeypatch.setenv("GOOGLE_WEB_CLIENT_ID", "test-client-id")
-    monkeypatch.setenv("GOOGLE_WEB_CLIENT_SECRET", "test-client-secret")
-    monkeypatch.setenv("CVDOCS_API_KEY", "test-shared-secret")
-    s = Settings()
-    s.storage.backend = "sqlite"
-    s.storage.sqlite_path = str(tmp_path / "cvdocs.db")
-    s.google.web_redirect_uri = "http://localhost:8000/auth/google/callback"
-    return s
+import generate as generate_module
+import mutate as mutate_module
+import web_jobs
+import webapp
+from blocks import Block
+from fakes import FakeLLMClient
+from storage.filesystem import FilesystemBlockStorage
 
 
-@pytest.fixture
-def client(settings, monkeypatch):
-    import webapp
-
+def _client(settings, monkeypatch):
     monkeypatch.setattr(webapp, "load_settings", lambda: settings)
-    return fastapi.testclient.TestClient(webapp.app)
+    monkeypatch.setenv(settings.web_service.api_key_env, "test-key")
+    return TestClient(webapp.app)
 
 
-def _patch_fetch_token_success(monkeypatch, creds, captured_code_verifiers=None):
-    def fake_fetch_token(self, **kwargs):
-        if captured_code_verifiers is not None:
-            captured_code_verifiers.append(self.code_verifier)
-        self.credentials = creds
-        return {"access_token": creds.token, "refresh_token": creds.refresh_token}
-
-    monkeypatch.setattr(
-        Flow,
-        "credentials",
-        property(
-            lambda self: self.__dict__.get("credentials"),
-            lambda self, value: self.__dict__.__setitem__("credentials", value),
-        ),
-    )
-    monkeypatch.setattr(Flow, "fetch_token", fake_fetch_token)
+def _wait_for_job(job_id: str, timeout: float = 2.0) -> web_jobs.Job:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        job = web_jobs.get_job(job_id)
+        if job is not None and job.status != "running":
+            return job
+        time.sleep(0.01)
+    raise AssertionError(f"job {job_id} did not finish within {timeout}s")
 
 
-def _patch_fetch_token_failure(monkeypatch):
-    def fake_fetch_token(self, **kwargs):
-        raise Exception("invalid_grant")
-
-    monkeypatch.setattr(Flow, "fetch_token", fake_fetch_token)
-
-
-def _state_from_login(client):
-    response = client.get(
-        "/auth/google/login", params={"key": "test-shared-secret"}, follow_redirects=False
-    )
-    location = response.headers["location"]
-    query = parse_qs(urlparse(location).query)
-    return query["state"][0]
+def _stream(client, url):
+    with client.stream("GET", url) as response:
+        text = "".join(response.iter_text())
+    parsed = []
+    for block in text.split("\n\n"):
+        block = block.strip()
+        if not block:
+            continue
+        kind = "complete" if block.startswith("event: complete") else "data"
+        payload = json.loads(block.split("data: ", 1)[1])
+        parsed.append((kind, payload))
+    return parsed
 
 
-def test_login_redirects_to_google_with_correct_key(client):
-    response = client.get(
-        "/auth/google/login", params={"key": "test-shared-secret"}, follow_redirects=False
-    )
+def test_generate_start_runs_in_background_and_saves(settings, monkeypatch, fake_router):
+    client = _client(settings, monkeypatch)
+    llm = FakeLLMClient(replies=["## Sheriff Outpost\n\nA frontier outpost.\n\n**Role:** nobody\n"])
+    fake_router(generate_module, llm)
 
-    assert response.status_code == 302
-    location = response.headers["location"]
-    assert location.startswith("https://accounts.google.com/o/oauth2/auth")
-    assert "test-client-id" in location
-
-
-def test_full_round_trip_persists_credentials(client, settings, monkeypatch):
-    state = _state_from_login(client)
-
-    fake_creds = Credentials(
-        token="fake-access-token",
-        refresh_token="fake-refresh-token",
-        token_uri="https://oauth2.googleapis.com/token",
-        client_id="x",
-        client_secret="y",
-        scopes=settings.google.scopes,
-    )
-    captured_code_verifiers = []
-    _patch_fetch_token_success(monkeypatch, fake_creds, captured_code_verifiers)
-
-    response = client.get(
-        "/auth/google/callback", params={"code": "some-code", "state": state}
+    response = client.post(
+        "/generate/start", params={"key": "test-key"}, json={"criteria": "a sheriff outpost"}
     )
 
     assert response.status_code == 200
-    loaded = SqliteCredentialsStorage(settings.storage_db_path).load()
-    assert loaded is not None
-    assert loaded.token == "fake-access-token"
-    assert loaded.refresh_token == "fake-refresh-token"
-    # Regression check: the code_verifier that reaches Google's real token endpoint
-    # must be non-None — a real Google server rejects a missing one with
-    # "invalid_grant: Missing code verifier." (a fake fetch_token that ignores
-    # self.code_verifier entirely wouldn't otherwise catch that).
-    assert captured_code_verifiers[0] is not None
+    job_id = response.json()["job_id"]
+    job = _wait_for_job(job_id)
+    assert job.status == "done"
+    assert job.outcome == {"block_id": "sheriff_outpost", "duplicate": False, "duplicate_of": None}
 
 
-def test_login_missing_key_is_422(client, settings):
-    response = client.get("/auth/google/login", follow_redirects=False)
+def test_generate_start_reports_skip_duplicate(settings, monkeypatch, fake_router):
+    body = "## Sheriff Outpost\n\nA frontier outpost.\n\n**Role:** nobody\n"
+    FilesystemBlockStorage(settings.blocks_path).save(Block(id="", body=body), filename_stem="sheriff_outpost")
+    client = _client(settings, monkeypatch)
+    llm = FakeLLMClient(replies=[body])
+    fake_router(generate_module, llm)
+
+    response = client.post(
+        "/generate/start", params={"key": "test-key"}, json={"criteria": "a sheriff outpost"}
+    )
+
+    job = _wait_for_job(response.json()["job_id"])
+    assert job.status == "done"
+    assert job.outcome == {"block_id": None, "duplicate": True, "duplicate_of": "sheriff_outpost"}
+
+
+def test_mutate_start_runs_in_background_and_saves(settings, monkeypatch, fake_router):
+    FilesystemBlockStorage(settings.blocks_path).save(
+        Block(id="", body="## Police Station\n\nRegular station.\n\n**Rooms:**\n- Office\n"),
+        filename_stem="police_station",
+    )
+    client = _client(settings, monkeypatch)
+    llm = FakeLLMClient(
+        replies=[
+            "===BODY===\n## Police Station\n\nRenovated station.\n\n**Rooms:**\n- Office\n"
+            "- Armory\n===LABEL===\nrenovated\n"
+        ]
+    )
+    fake_router(mutate_module, llm)
+
+    response = client.post(
+        "/mutate/start",
+        params={"key": "test-key"},
+        json={"block_id": "police_station", "criteria": "add an armory"},
+    )
+
+    assert response.status_code == 200
+    job = _wait_for_job(response.json()["job_id"])
+    assert job.status == "done"
+    assert job.outcome == {"block_id": "police_station_mut_renovated"}
+
+
+def test_generate_start_rejects_empty_criteria(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+
+    response = client.post("/generate/start", params={"key": "test-key"}, json={"criteria": "   "})
+
+    assert response.status_code == 400
+
+
+def test_generate_start_rejects_unknown_style_from_id(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+
+    response = client.post(
+        "/generate/start",
+        params={"key": "test-key"},
+        json={"criteria": "a sheriff outpost", "style_from": ["does-not-exist"]},
+    )
+
+    assert response.status_code == 400
+
+
+def test_mutate_start_rejects_unknown_block_id(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+
+    response = client.post(
+        "/mutate/start",
+        params={"key": "test-key"},
+        json={"block_id": "does-not-exist", "criteria": "add an armory"},
+    )
+
+    assert response.status_code == 400
+
+
+def test_mutate_start_rejects_empty_criteria(settings, monkeypatch):
+    FilesystemBlockStorage(settings.blocks_path).save(
+        Block(id="", body="## Police Station\n\nRegular station.\n\n**Rooms:**\n- Office\n"),
+        filename_stem="police_station",
+    )
+    client = _client(settings, monkeypatch)
+
+    response = client.post(
+        "/mutate/start", params={"key": "test-key"}, json={"block_id": "police_station", "criteria": "  "}
+    )
+
+    assert response.status_code == 400
+
+
+def test_generate_stream_delivers_progress_then_done_outcome(settings, monkeypatch, fake_router):
+    client = _client(settings, monkeypatch)
+    llm = FakeLLMClient(replies=["## Sheriff Outpost\n\nA frontier outpost.\n\n**Role:** nobody\n"])
+    fake_router(generate_module, llm)
+
+    start = client.post("/generate/start", params={"key": "test-key"}, json={"criteria": "a sheriff outpost"})
+    job_id = start.json()["job_id"]
+
+    parsed = _stream(client, f"/generate/stream/{job_id}?key=test-key")
+
+    kinds = [payload["kind"] for kind, payload in parsed if kind == "data"]
+    assert "generate_start" in kinds
+    assert "naming" in kinds
+    assert parsed[-1] == (
+        "complete",
+        {"status": "done", "block_id": "sheriff_outpost", "duplicate": False, "duplicate_of": None},
+    )
+
+
+def test_mutate_stream_delivers_progress_then_done_outcome(settings, monkeypatch, fake_router):
+    FilesystemBlockStorage(settings.blocks_path).save(
+        Block(id="", body="## Police Station\n\nRegular station.\n\n**Rooms:**\n- Office\n"),
+        filename_stem="police_station",
+    )
+    client = _client(settings, monkeypatch)
+    llm = FakeLLMClient(
+        replies=[
+            "===BODY===\n## Police Station\n\nRenovated station.\n\n**Rooms:**\n- Office\n"
+            "- Armory\n===LABEL===\nrenovated\n"
+        ]
+    )
+    fake_router(mutate_module, llm)
+
+    start = client.post(
+        "/mutate/start",
+        params={"key": "test-key"},
+        json={"block_id": "police_station", "criteria": "add an armory"},
+    )
+    job_id = start.json()["job_id"]
+
+    parsed = _stream(client, f"/mutate/stream/{job_id}?key=test-key")
+
+    kinds = [payload["kind"] for kind, payload in parsed if kind == "data"]
+    assert "mutate_start" in kinds
+    assert parsed[-1] == ("complete", {"status": "done", "block_id": "police_station_mut_renovated"})
+
+
+def test_generate_stream_reports_error_outcome_on_exhausted_retry(settings, monkeypatch, fake_router):
+    client = _client(settings, monkeypatch)
+    llm = FakeLLMClient(replies=["still no heading", "still no heading"])
+    fake_router(generate_module, llm)
+
+    start = client.post("/generate/start", params={"key": "test-key"}, json={"criteria": "a sheriff outpost"})
+    job_id = start.json()["job_id"]
+
+    parsed = _stream(client, f"/generate/stream/{job_id}?key=test-key")
+
+    kind, payload = parsed[-1]
+    assert kind == "complete"
+    assert payload["status"] == "error"
+    assert "error" in payload
+
+
+def test_stream_connect_after_job_finished_still_replays_full_history(settings, monkeypatch, fake_router):
+    client = _client(settings, monkeypatch)
+    llm = FakeLLMClient(replies=["## Sheriff Outpost\n\nA frontier outpost.\n\n**Role:** nobody\n"])
+    fake_router(generate_module, llm)
+
+    start = client.post("/generate/start", params={"key": "test-key"}, json={"criteria": "a sheriff outpost"})
+    job_id = start.json()["job_id"]
+    _wait_for_job(job_id)  # job already finished before we ever connect to the stream
+
+    parsed = _stream(client, f"/generate/stream/{job_id}?key=test-key")
+
+    kinds = [payload["kind"] for kind, payload in parsed if kind == "data"]
+    assert "generate_start" in kinds
+    assert "naming" in kinds
+    assert parsed[-1][0] == "complete"
+    assert parsed[-1][1]["status"] == "done"
+
+
+def test_generate_stream_rejects_unknown_job_id(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+
+    response = client.get("/generate/stream/does-not-exist", params={"key": "test-key"})
+
+    assert response.status_code == 404
+
+
+def test_mutate_stream_rejects_unknown_job_id(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+
+    response = client.get("/mutate/stream/does-not-exist", params={"key": "test-key"})
+
+    assert response.status_code == 404
+
+
+def test_generate_start_rejects_missing_key(settings, monkeypatch):
+    # `key` has no default, so FastAPI's own request validation rejects a missing one
+    # (422) before the route body's _authorized check ever runs — still "rejected, no
+    # job created," just via a different, earlier mechanism than a wrong key (401).
+    client = _client(settings, monkeypatch)
+    jobs_before = len(web_jobs._jobs)
+
+    response = client.post("/generate/start", json={"criteria": "a sheriff outpost"})
 
     assert response.status_code == 422
-    from storage.sqlite import SqlitePendingSignInStore
-
-    assert SqlitePendingSignInStore(settings.storage_db_path).verify_and_consume("anything") is None
+    assert len(web_jobs._jobs) == jobs_before
 
 
-def test_login_wrong_key_is_401(client, settings):
-    response = client.get(
-        "/auth/google/login", params={"key": "wrong"}, follow_redirects=False
+def test_generate_start_rejects_wrong_key(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+    jobs_before = len(web_jobs._jobs)
+
+    response = client.post(
+        "/generate/start", params={"key": "wrong-key"}, json={"criteria": "a sheriff outpost"}
     )
 
     assert response.status_code == 401
-    from storage.sqlite import SqlitePendingSignInStore
-
-    assert SqlitePendingSignInStore(settings.storage_db_path).verify_and_consume("anything") is None
+    assert len(web_jobs._jobs) == jobs_before
 
 
-def test_callback_with_error_leaves_existing_connection_untouched(client, settings):
-    existing_creds = Credentials(
-        token="existing-token",
-        refresh_token="existing-refresh",
-        token_uri="https://oauth2.googleapis.com/token",
-        client_id="x",
-        client_secret="y",
-        scopes=settings.google.scopes,
-    )
-    SqliteCredentialsStorage(settings.storage_db_path).save(existing_creds)
+def test_mutate_start_rejects_missing_key(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+    jobs_before = len(web_jobs._jobs)
 
-    response = client.get("/auth/google/callback", params={"error": "access_denied"})
+    response = client.post("/mutate/start", json={"block_id": "police_station", "criteria": "add an armory"})
 
-    assert response.status_code == 400
-    loaded = SqliteCredentialsStorage(settings.storage_db_path).load()
-    assert loaded.token == "existing-token"
-    assert loaded.refresh_token == "existing-refresh"
+    assert response.status_code == 422
+    assert len(web_jobs._jobs) == jobs_before
 
 
-def test_callback_with_unknown_state_is_400(client, settings):
-    response = client.get(
-        "/auth/google/callback", params={"code": "some-code", "state": "never-started"}
+def test_mutate_start_rejects_wrong_key(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+    jobs_before = len(web_jobs._jobs)
+
+    response = client.post(
+        "/mutate/start",
+        params={"key": "wrong-key"},
+        json={"block_id": "police_station", "criteria": "add an armory"},
     )
 
-    assert response.status_code == 400
-    assert SqliteCredentialsStorage(settings.storage_db_path).load() is None
+    assert response.status_code == 401
+    assert len(web_jobs._jobs) == jobs_before
 
 
-def test_callback_with_failed_exchange_is_400(client, settings, monkeypatch):
-    state = _state_from_login(client)
-    _patch_fetch_token_failure(monkeypatch)
+def test_generate_stream_rejects_missing_key(settings, monkeypatch, fake_router):
+    client = _client(settings, monkeypatch)
+    llm = FakeLLMClient(replies=["## Sheriff Outpost\n\nA frontier outpost.\n\n**Role:** nobody\n"])
+    fake_router(generate_module, llm)
+    start = client.post("/generate/start", params={"key": "test-key"}, json={"criteria": "a sheriff outpost"})
+    job_id = start.json()["job_id"]
 
-    response = client.get(
-        "/auth/google/callback", params={"code": "bad-code", "state": state}
+    response = client.get(f"/generate/stream/{job_id}")
+
+    assert response.status_code == 422
+    assert not response.headers["content-type"].startswith("text/event-stream")
+
+
+def test_generate_stream_rejects_wrong_key(settings, monkeypatch, fake_router):
+    client = _client(settings, monkeypatch)
+    llm = FakeLLMClient(replies=["## Sheriff Outpost\n\nA frontier outpost.\n\n**Role:** nobody\n"])
+    fake_router(generate_module, llm)
+    start = client.post("/generate/start", params={"key": "test-key"}, json={"criteria": "a sheriff outpost"})
+    job_id = start.json()["job_id"]
+
+    response = client.get(f"/generate/stream/{job_id}", params={"key": "wrong-key"})
+
+    assert response.status_code == 401
+    assert not response.headers["content-type"].startswith("text/event-stream")
+
+
+def test_mutate_stream_rejects_missing_key(settings, monkeypatch, fake_router):
+    FilesystemBlockStorage(settings.blocks_path).save(
+        Block(id="", body="## Police Station\n\nRegular station.\n\n**Rooms:**\n- Office\n"),
+        filename_stem="police_station",
     )
+    client = _client(settings, monkeypatch)
+    llm = FakeLLMClient(
+        replies=[
+            "===BODY===\n## Police Station\n\nRenovated station.\n\n**Rooms:**\n- Office\n"
+            "- Armory\n===LABEL===\nrenovated\n"
+        ]
+    )
+    fake_router(mutate_module, llm)
+    start = client.post(
+        "/mutate/start",
+        params={"key": "test-key"},
+        json={"block_id": "police_station", "criteria": "add an armory"},
+    )
+    job_id = start.json()["job_id"]
 
-    assert response.status_code == 400
-    assert SqliteCredentialsStorage(settings.storage_db_path).load() is None
+    response = client.get(f"/mutate/stream/{job_id}")
+
+    assert response.status_code == 422
+    assert not response.headers["content-type"].startswith("text/event-stream")
+
+
+def test_mutate_stream_rejects_wrong_key(settings, monkeypatch, fake_router):
+    FilesystemBlockStorage(settings.blocks_path).save(
+        Block(id="", body="## Police Station\n\nRegular station.\n\n**Rooms:**\n- Office\n"),
+        filename_stem="police_station",
+    )
+    client = _client(settings, monkeypatch)
+    llm = FakeLLMClient(
+        replies=[
+            "===BODY===\n## Police Station\n\nRenovated station.\n\n**Rooms:**\n- Office\n"
+            "- Armory\n===LABEL===\nrenovated\n"
+        ]
+    )
+    fake_router(mutate_module, llm)
+    start = client.post(
+        "/mutate/start",
+        params={"key": "test-key"},
+        json={"block_id": "police_station", "criteria": "add an armory"},
+    )
+    job_id = start.json()["job_id"]
+
+    response = client.get(f"/mutate/stream/{job_id}", params={"key": "wrong-key"})
+
+    assert response.status_code == 401
+    assert not response.headers["content-type"].startswith("text/event-stream")
+
+
+def test_auth_google_login_rejects_missing_key(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+
+    response = client.get("/auth/google/login", follow_redirects=False)
+
+    assert response.status_code == 422

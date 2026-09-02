@@ -123,6 +123,29 @@ This is a single shared connection for the whole deployment (not one per visitin
 and is entirely independent of the local CLI's own connection from section 1 — connecting
 one doesn't connect the other.
 
+#### Running `generate`/`mutate` over HTTP
+
+Once the service is running, `generate` and `mutate` are also reachable over HTTP, gated by
+the same `?key=<CVDOCS_API_KEY>` credential as `/auth/google/login`:
+
+- `POST /generate/start` / `POST /mutate/start` — same inputs as the CLI's `generate`/`mutate`
+  commands (JSON body), return `{"job_id": "..."}` immediately rather than blocking until the
+  LLM call finishes.
+- `GET /generate/stream/{job_id}` / `GET /mutate/stream/{job_id}` — a Server-Sent Events stream
+  of that run's progress, ending in one final `event: complete` line with the outcome (the
+  produced block's id, or an error). Reconnecting after a run has already finished still
+  replays its full history. Neither tool has a cancel endpoint — each is a single short LLM
+  call chain, not worth interrupting mid-flight.
+
+```
+curl -X POST "http://localhost:8000/generate/start?key=<CVDOCS_API_KEY>" \
+     -H "Content-Type: application/json" \
+     -d '{"criteria": "a small lighthouse keeper role"}'
+# -> {"job_id": "<id>"}
+
+curl -N "http://localhost:8000/generate/stream/<id>?key=<CVDOCS_API_KEY>"
+```
+
 ## Usage
 
 ```
