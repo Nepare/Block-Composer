@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import core.config as config
 from core.config import Settings, load_settings
 
 PROJECT_CONFIG = Path(__file__).resolve().parent.parent.parent / "config.yaml"
@@ -52,3 +53,25 @@ def test_openrouter_api_key_defaults_to_empty_string(monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     s = Settings()
     assert s.llm.openrouter.api_key == ""
+
+
+def test_load_settings_uses_docker_overrides_when_running_in_docker(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "_running_in_docker", lambda: True)
+    p = tmp_path / "config.yaml"
+    p.write_text("", encoding="utf-8")
+
+    settings = load_settings(p)
+
+    assert settings.llm.ollama.base_url == "http://ollama:11434"
+    assert settings.path.storage.backend == "sqlite"
+
+
+def test_load_settings_keeps_local_defaults_when_not_running_in_docker(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "_running_in_docker", lambda: False)
+    p = tmp_path / "config.yaml"
+    p.write_text("", encoding="utf-8")
+
+    settings = load_settings(p)
+
+    assert settings.llm.ollama.base_url == "http://localhost:11434"
+    assert settings.path.storage.backend == "filesystem"

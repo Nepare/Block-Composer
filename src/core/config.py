@@ -6,7 +6,20 @@ import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+def _resolve_project_root() -> Path:
+    # A non-editable install (e.g. the Docker image's `pip install .`) copies this file into
+    # site-packages, three levels away from anything meaningful — fall back to the working
+    # directory (the deployment's WORKDIR) when that's where config.yaml actually lives.
+    package_relative = Path(__file__).resolve().parent.parent.parent
+    if (package_relative / "config.yaml").exists():
+        return package_relative
+    cwd = Path.cwd()
+    if (cwd / "config.yaml").exists():
+        return cwd
+    return package_relative
+
+
+PROJECT_ROOT = _resolve_project_root()
 
 
 class OpenRouterConfig(BaseModel):
@@ -20,6 +33,7 @@ class OpenRouterConfig(BaseModel):
 
 class OllamaConfig(BaseModel):
     base_url: str = "http://localhost:11434"
+    docker_base_url: str = "http://ollama:11434"
 
 
 class ProviderConfig(BaseModel):
@@ -72,10 +86,10 @@ class ComposeConfig(BaseModel):
 
 
 class StorageConfig(BaseModel):
-    """Picks the block/result storage backend via storage/router.py's dispatch; overridable
-    by the CVDOCS_STORAGE_BACKEND env var (see load_settings)."""
+    """Picks the block/result storage backend via storage/router.py's dispatch."""
 
     backend: Literal["filesystem", "sqlite"] = "filesystem"
+    docker_backend: Literal["filesystem", "sqlite"] = "sqlite"
     sqlite_path: str = "output/cvdocs.db"
 
 
@@ -140,16 +154,20 @@ class Settings(BaseModel):
         return self.resolve(self.path.storage.sqlite_path)
 
 
+def _running_in_docker() -> bool:
+    return Path("/.dockerenv").exists()
+
+
 def load_settings(config_path: Path | str | None = None) -> Settings:
-    """CLI flag > env > .env > config.yaml > defaults. CVDOCS_STORAGE_BACKEND is the one
-    setting allowed to come from the environment (a deployment fact, not a preference)."""
+    """CLI flag > .env > config.yaml > defaults. Running inside the hosted Docker deployment
+    is detected directly (not read from config or env) and swaps in the docker_* values."""
     load_dotenv(PROJECT_ROOT / ".env")
     path = Path(config_path) if config_path else PROJECT_ROOT / "config.yaml"
     data: dict[str, Any] = {}
     if path.exists():
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     settings = Settings.model_validate(data)
-    env_backend = os.environ.get("CVDOCS_STORAGE_BACKEND")
-    if env_backend:
-        settings.path.storage.backend = env_backend
+    if _running_in_docker():
+        settings.llm.ollama.base_url = settings.llm.ollama.docker_base_url
+        settings.path.storage.backend = settings.path.storage.docker_backend
     return settings

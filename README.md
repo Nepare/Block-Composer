@@ -55,12 +55,31 @@ llm:
     naming: openrouter:minimax/minimax-m3:free
 ```
 
-To use it as shipped:
+Setting up local models depends on how you use the app. 
+
+- **2.1 Local CLI** — you're running `cvdocs` directly on your own machine. You need to 
+  install Ollama on your machine locally.
+- **2.2 Hosted deployment** — you're running `cvdocs` as a Docker container, e.g. to serve
+  the HTTP API to others or from a server with no local browser to pop a window on. Everything
+  is installed automatically.
+
+#### 2.1 Local CLI
+
 1. Install from [ollama.com](https://ollama.com) (or `winget install Ollama.Ollama` on
    Windows) and make sure `ollama serve` is running (the installer starts it automatically).
 2. `ollama pull qwen3:1.7b`
 
 No dedicated GPU is required — this is a small model that runs fine on CPU.
+
+#### 2.2 Hosted deployment (Docker)
+
+No installation is needed.
+
+`docker-compose.yml` runs its own `ollama` sidecar and an `ollama-pull` step that pulls that 
+model automatically on first start; the weights are kept in a named volume, so a restart 
+doesn't re-download them. Change `llm.models.naming` and the next `docker compose up` pulls 
+whatever you set. If it's not an `ollama:` model at all (e.g. pointed back at OpenRouter per 
+the example above), `ollama-pull` skips the pull entirely.
 
 ### 3. Google OAuth setup
 
@@ -108,8 +127,7 @@ choice if you push it there.
 
 #### 3.2 Hosted deployment (Docker)
 
-Running `cvdocs` as a Docker container (`path.storage.backend: sqlite`) uses a *different*
-Google connection method than the local CLI — a browser-based OAuth flow served over HTTP,
+Running `cvdocs` as a Docker container uses a *different* Google connection method than the local CLI — a browser-based OAuth flow served over HTTP,
 since there's no local machine for a browser popup to talk to. This needs its own Google
 OAuth client (a **Web application** client, not the Desktop-app one from 3.1) plus a secret
 of its own:
@@ -222,6 +240,12 @@ curl -N "http://localhost:8000/generate/stream/<id>?key=<CVDOCS_API_KEY>"
   the first two name env vars, never hold secrets themselves) and
   `auth.web_service.api_key_env` (names the env var holding the hosted deployment's shared
   authorization credential, also hosted-only).
+
+Two settings differ between local CLI and the hosted Docker deployment —
+`llm.ollama.base_url`/`docker_base_url` and `path.storage.backend`/`docker_backend` — and
+both values are checked into `config.yaml` side by side. Which one applies is detected
+automatically at runtime (checking for `/.dockerenv`), never via an environment variable or
+a manual edit — the same unmodified `config.yaml` is correct in both contexts.
 
 Secrets never live in `config.yaml` — only the *names* of the env vars that hold them do.
 They live in a gitignored `.env` instead: `OPENROUTER_API_KEY` always; `GOOGLE_WEB_CLIENT_ID`,

@@ -1,5 +1,6 @@
 import pytest
 
+import core.config as config
 from auth.installed_app import InstalledAppAuthProvider
 from auth.router import get_auth_provider
 from auth.web import WebAuthProvider
@@ -95,20 +96,22 @@ def test_get_auth_provider_raises_a_clear_error_for_an_unknown_backend():
         get_auth_provider(settings)
 
 
-def test_get_auth_provider_follows_the_cvdocs_storage_backend_env_override(tmp_path, monkeypatch):
+def test_get_auth_provider_follows_running_in_docker_detection(tmp_path, monkeypatch):
     """FR-007: connection method is a consequence of deployment mode alone — the same
-    env var that already decides storage.backend (no separate 'which auth flow' setting)."""
+    runtime-detection signal that already decides storage.backend (no separate 'which
+    auth flow' setting)."""
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        f"storage:\n  backend: filesystem\n  sqlite_path: {tmp_path / 'cvdocs.db'}\n"
+        f"storage:\n  backend: filesystem\n  docker_backend: sqlite\n"
+        f"  sqlite_path: {tmp_path / 'cvdocs.db'}\n"
         f"google:\n  token_path: {tmp_path / 'token.json'}\n",
         encoding="utf-8",
     )
 
-    monkeypatch.delenv("CVDOCS_STORAGE_BACKEND", raising=False)
+    monkeypatch.setattr(config, "_running_in_docker", lambda: False)
     local_settings = load_settings(config_path)
     assert isinstance(get_auth_provider(local_settings), InstalledAppAuthProvider)
 
-    monkeypatch.setenv("CVDOCS_STORAGE_BACKEND", "sqlite")
+    monkeypatch.setattr(config, "_running_in_docker", lambda: True)
     hosted_settings = load_settings(config_path)
     assert isinstance(get_auth_provider(hosted_settings), WebAuthProvider)

@@ -8,6 +8,7 @@ llm:
 
   ollama:
     base_url: http://localhost:11434
+    docker_base_url: http://ollama:11434
 
   models:
     generate: openrouter:minimax/minimax-m3:free
@@ -25,6 +26,7 @@ path:
 
   storage:
     backend: filesystem
+    docker_backend: sqlite
     sqlite_path: output/cvdocs.db
 
   constraints:

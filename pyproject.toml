@@ -32,7 +32,7 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 package-dir = {"" = "src"}
 py-modules = ["cli"]
-packages = ["parsing", "llm", "llm.providers", "auth", "storage", "core", "tools", "models", "web"]
+packages = ["parsing", "llm", "llm.providers", "auth", "storage", "core", "tools", "models", "web", "deploy"]
 
 [tool.ruff]
 line-length = 100

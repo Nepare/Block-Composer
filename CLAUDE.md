@@ -15,7 +15,8 @@ in `.claude/skills/speckit-*` / `.specify/`, in this order:
    `data-model.md`, `contracts/`, `quickstart.md`) — the actual technical design.
 4. `speckit-tasks` — turns the plan into `specs/NNN-name/tasks.md`, a dependency-ordered task
    list.
-5. `speckit-implement` — executes the tasks. Always goes with the argument "The main agent is the orchestrator, the tasks are done by subagents. Use parallel deployment of subagents where possible."
+5. `speckit-implement` — executes the tasks. Always goes with the argument "The main agent is the orchestrator, the tasks are done by subagents. Use parallel deployment of subagents where possible. Remind subagents that they are not
+orchestrators themselves and need to do the task by themselves. Don't forget to check completed tasks."
 
 Past features are the reference examples for tone and structure —
 read one before writing a new spec. **Do not jump straight to editing source files** for
