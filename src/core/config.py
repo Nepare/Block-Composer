@@ -62,10 +62,9 @@ class PromptConstraintsConfig(BaseModel):
 
 
 class ComposeConfig(BaseModel):
-    """Below keyword_search_min_blocks, compose narrows nothing; at or above it, narrows to
-    keyword-matched blocks (see compose.py::_select_candidate_blocks)."""
+    """Compose always narrows the block library to keyword-matched blocks before planning
+    (see compose.py::_select_candidate_blocks)."""
 
-    keyword_search_min_blocks: int = 5
     keyword_search_top_n: int = 12
     keyword_search_unmatched_reserve: int = 2  # fixed, not proportional to top_n
     keywords_per_category_min: int = 0

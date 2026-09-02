@@ -215,7 +215,7 @@ curl -N "http://localhost:8000/generate/stream/<id>?key=<CVDOCS_API_KEY>"
   fallback style examples `generate` learns from when the library is still empty),
   `path.storage.*` (which storage backend, and its DB path), and `path.constraints.*` (paths
   to the `input_prompts/constraints/*.md` files, see below).
-- `behavior.compose.*` — compose's own tuning knobs (candidate-narrowing thresholds, keyword
+- `behavior.compose.*` — compose's own tuning knobs (candidate-narrowing size/reserve, keyword
   counts).
 - `auth.*` — `auth.google.web_client_id_env` / `.web_client_secret_env` / `.web_redirect_uri`
   (hosted-deployment-only, see [Setup 3.2](#32-hosted-deployment-docker);

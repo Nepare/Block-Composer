@@ -35,7 +35,6 @@ path:
 
 behavior:
   compose:
-    keyword_search_min_blocks: 5 # min number of blocks in the library to trigger keyword search
     keyword_search_top_n: 12 # number of most relevant blocks to consider
     keyword_search_unmatched_reserve: 2 # number of unmatched blocks to reserve (near keyword score miss)
     keywords_per_category_min: 0

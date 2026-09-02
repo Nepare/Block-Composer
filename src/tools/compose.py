@@ -38,12 +38,8 @@ def _select_candidate_blocks(
     settings: Settings,
     progress: ProgressSink,
 ) -> list[Block]:
-    """Below settings.behavior.compose.keyword_search_min_blocks, every block goes to the planner
-    unnarrowed; at or above it, narrows to the blocks matching keywords extracted from the
-    request."""
+    """Narrows the block library to the blocks matching keywords extracted from the request."""
     blocks = [b for b in store.all() if b.id not in exclude_ids]
-    if len(blocks) < settings.behavior.compose.keyword_search_min_blocks:
-        return blocks
 
     naming_client, naming_model = get_client_and_model(settings.llm.models.naming, settings, on_progress=progress)
     compose_constraints = constraints_module.load(settings, "compose")
