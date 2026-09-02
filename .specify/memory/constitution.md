@@ -1,12 +1,19 @@
 <!--
 Sync Impact Report
-- Version change: 1.0.0 → 1.1.0
-- Modified principles: none renamed; minor typo/wording fixes in I, IV, V (non-semantic)
-- Added principles: VI. Minimal, Behavior-Only Comments
+- Version change: 1.1.0 → 2.0.0
+- Modified principles: V. Single Source of Truth for Configuration — redefined
+  (backward-incompatible): the CVDOCS_STORAGE_BACKEND-style env-var carve-out for
+  deployment-environment facts is removed. Every setting, including ones that differ by
+  deployment target, must be expressed as values inside config.yaml; a genuine runtime fact
+  (e.g. containerization) is detected directly (e.g. checking for /.dockerenv) and used only
+  to select between config.yaml values, never sourced from an env var. Env vars are now
+  reserved exclusively for secrets.
+- Added principles: none
 - Added sections: none
-- Removed sections: none (Development Workflow's now-redundant comment-style sentence
-  removed, superseded by Principle VI)
-- Follow-up TODOs: none
+- Removed sections: none
+- Follow-up TODOs: existing CVDOCS_STORAGE_BACKEND usage (src/core/config.py's
+  load_settings, docker-compose.yml) must be migrated to the runtime-detection pattern by
+  the feature that touches it (tracked outside this document, per Governance).
 -->
 
 # cvdocs Constitution
@@ -45,12 +52,16 @@ specific storage backend directly. A module that needs Settings/IO to make a dec
 could otherwise make from data alone is a design smell to fix, not a convenience to keep.
 
 ### V. Single Source of Truth for Configuration
-`config.yaml` is the source of truth for every setting. Environment variables are reserved
-narrowly for two things only: secrets (e.g. `OPENROUTER_API_KEY`) and genuine
-deployment-environment facts that a checked-in file cannot express (e.g.
-`CVDOCS_STORAGE_BACKEND` — "am I running in a container"). Environment variables MUST NOT
-become a general override mechanism for ordinary settings; each new env-sourced value needs
-its own explicit justification, documented at its point of use.
+`config.yaml` is the sole source of truth for every setting, regardless of deployment mode. 
+When a setting legitimately needs a different value in different deployment contexts, both 
+candidate values MUST live side by side in `config.yaml`, and the choice between them MUST be 
+made by a plain runtime check for the underlying environment fact (e.g. checking for `/.dockerenv`
+to detect containerization) — never by threading that choice through an environment
+variable. Environment variables are reserved exclusively for secrets (e.g.
+`OPENROUTER_API_KEY`); they MUST NOT be used to select between `config.yaml` values, and
+MUST NOT become a general override mechanism for ordinary settings, deployment-environment
+facts included. Any existing env-var override of this kind is a violation to be migrated to
+the runtime-detection pattern by the next feature that touches it, not left in place.
 
 ### VI. Minimal, Behavior-Only Comments
 Default to no comments; well-named identifiers carry the *what*. When a comment is genuinely
@@ -84,10 +95,10 @@ the same.
 
 This constitution supersedes ad hoc practice for anything it covers. Amendments happen via
 this same document, through the constitution-update workflow — not by silent drift in
-unrelated commits. Any deviation from a principle (e.g. skipping live verification, adding an
-env-var override outside Principle V's narrow carve-out) MUST be justified explicitly in the
+unrelated commits. Any deviation from a principle (e.g. skipping live verification, adding a
+new env-sourced value for anything other than a secret) MUST be justified explicitly in the
 PR/commit description or session summary at the time it happens, not retrofitted later.
 Complexity (a new dependency, a new abstraction layer, a new config axis) must be justified
 against Principle II before it's added.
 
-**Version**: 1.1.0 | **Ratified**: 2026-09-01 | **Last Amended**: 2026-09-01
+**Version**: 2.0.0 | **Ratified**: 2026-09-01 | **Last Amended**: 2026-09-02
