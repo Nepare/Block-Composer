@@ -14,23 +14,28 @@ from core.progress import ProgressEvent
 class Job:
     id: str
     queue: "queue.Queue" = field(default_factory=queue.Queue)
-    status: str = "running"  # running | done | error
+    status: str = "running"  # running | done | cancelled | error
     outcome: dict = field(default_factory=dict)
+    cancel_event: threading.Event | None = None
 
 
 _jobs: dict[str, Job] = {}
 _jobs_lock = threading.Lock()
 
 
-def start_job(work: Callable[[Callable[[ProgressEvent], None]], dict]) -> Job:
-    job = Job(id=str(uuid.uuid4()))
+def start_job(
+    work: Callable[[Callable[[ProgressEvent], None], threading.Event | None], dict],
+    *,
+    cancellable: bool = False,
+) -> Job:
+    job = Job(id=str(uuid.uuid4()), cancel_event=threading.Event() if cancellable else None)
     with _jobs_lock:
         _jobs[job.id] = job
 
     def worker() -> None:
         try:
-            job.outcome = work(job.queue.put)
-            job.status = "done"
+            job.outcome = work(job.queue.put, job.cancel_event)
+            job.status = "cancelled" if job.outcome.get("cancelled") else "done"
         except CvdocsError as exc:
             job.outcome = {"error": str(exc)}
             job.status = "error"
@@ -53,6 +58,7 @@ def _event_json(event: ProgressEvent) -> str:
             "step": event.step,
             "total": event.total,
             "block_id": event.block_id,
+            "data": event.data,
             "at": event.at.isoformat(),
         }
     )

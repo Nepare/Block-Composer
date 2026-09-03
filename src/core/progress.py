@@ -18,6 +18,7 @@ class ProgressEvent:
     step: int | None = None
     total: int | None = None
     block_id: str | None = None
+    data: dict | None = None
     # diagnostic-only fields, populated by llm_call_* events, ignored by narrative sinks:
     model: str | None = None
     latency_ms: float | None = None

@@ -47,16 +47,16 @@ def test_pinned_use_and_generate_bypass_the_planner_entirely(settings, fake_rout
     fake_router(compose_module, client)
     fake_router(generate_module, client)
 
-    slots, result_path = compose_module.run_compose(
+    outcome = compose_module.run_compose(
         "", settings=settings, use_ids=["school"], generate_criteria=["a sawmill"]
     )
 
-    actions = {s.action: s.resolved_id for s in slots}
+    actions = {s.action: s.resolved_id for s in outcome.slots}
     assert actions["pinned_use"] == "school"
     assert actions["pinned_generate"] == "sawmill"
-    content = result_path.read_text(encoding="utf-8")
+    content = outcome.result_path.read_text(encoding="utf-8")
     assert "## School" in content and "## Sawmill" in content
-    assert result_path.name == "sawmill_overview.md"
+    assert outcome.result_path.name == "sawmill_overview.md"
     # no NL request -> no planning call, just the one generate + one result-naming call
     assert client.call_count == 2
 
@@ -85,12 +85,12 @@ def test_planner_prefers_mutate_over_generate_for_a_partial_fit(settings, fake_r
     fake_router(compose_module, client)
     fake_router(mutate_module, client)
 
-    slots, result_path = compose_module.run_compose("need law enforcement", settings=settings)
+    outcome = compose_module.run_compose("need law enforcement", settings=settings)
 
-    assert slots[0].action == "mutate"
-    assert slots[0].resolved_id == "sheriff_station"
-    assert "Sheriff Station" in result_path.read_text(encoding="utf-8")
-    assert result_path.name == "law_enforcement_setup.md"
+    assert outcome.slots[0].action == "mutate"
+    assert outcome.slots[0].resolved_id == "sheriff_station"
+    assert "Sheriff Station" in outcome.result_path.read_text(encoding="utf-8")
+    assert outcome.result_path.name == "law_enforcement_setup.md"
 
 
 def test_dry_run_makes_no_generate_or_mutate_calls(settings, fake_router):
@@ -102,10 +102,10 @@ def test_dry_run_makes_no_generate_or_mutate_calls(settings, fake_router):
     client = FakeLLMClient(replies=["NONE", unparseable_keywords_reply, plan])
     fake_router(compose_module, client)
 
-    slots, result_path = compose_module.run_compose("need a hospital", settings=settings, dry_run=True)
+    outcome = compose_module.run_compose("need a hospital", settings=settings, dry_run=True)
 
-    assert result_path is None
-    assert slots[0].resolved_id is None  # generate was never actually run
+    assert outcome.result_path is None
+    assert outcome.slots[0].resolved_id is None  # generate was never actually run
     # target-count detection + keyword-extraction + planning call -- dry-run skips result naming too
     assert client.call_count == 3
 
@@ -131,11 +131,11 @@ def test_ordering_of_pinned_use_slots_is_respected_in_output(settings, fake_rout
     _seed_library(settings)
     fake_router(compose_module, FakeLLMClient(replies=["town_defense_and_school"]))
 
-    slots, result_path = compose_module.run_compose(
+    outcome = compose_module.run_compose(
         "", settings=settings, use_ids=["police_station", "school"]
     )
 
-    content = result_path.read_text(encoding="utf-8")
+    content = outcome.result_path.read_text(encoding="utf-8")
     assert content.index("## Police Station") < content.index("## School")
 
 
@@ -164,11 +164,11 @@ def test_explicit_out_path_is_used_verbatim(settings, fake_router, tmp_path):
     out = tmp_path / "custom" / "myresult.md"
 
     # no fake_router needed: an explicit --out skips result-naming entirely (no LLM call)
-    _slots, result_path = compose_module.run_compose(
+    outcome = compose_module.run_compose(
         "", settings=settings, use_ids=["school"], out_path=out
     )
 
-    assert result_path == out
+    assert outcome.result_path == out
     assert out.exists()
 
 
@@ -177,11 +177,11 @@ def test_result_naming_reuses_the_same_file_for_identical_reruns(settings, fake_
     client = FakeLLMClient(replies=["school_overview", "school_overview"])
     fake_router(compose_module, client)
 
-    _slots1, result_path1 = compose_module.run_compose("", settings=settings, use_ids=["school"])
-    _slots2, result_path2 = compose_module.run_compose("", settings=settings, use_ids=["school"])
+    outcome1 = compose_module.run_compose("", settings=settings, use_ids=["school"])
+    outcome2 = compose_module.run_compose("", settings=settings, use_ids=["school"])
 
-    assert result_path2 == result_path1
-    assert result_path1.name == "school_overview.md"
+    assert outcome2.result_path == outcome1.result_path
+    assert outcome1.result_path.name == "school_overview.md"
     # one result-naming call per run; the second run's content is identical so
     # naming.decide() resolves it as an exact-match reuse with no further call
     assert client.call_count == 2
@@ -194,14 +194,14 @@ def test_result_naming_variant_on_a_conflicting_rerun(settings, fake_router):
     client = FakeLLMClient(replies=["overview", "overview", "variant"])
     fake_router(compose_module, client)
 
-    _slots1, result_path1 = compose_module.run_compose("", settings=settings, use_ids=["school"])
-    _slots2, result_path2 = compose_module.run_compose(
+    outcome1 = compose_module.run_compose("", settings=settings, use_ids=["school"])
+    outcome2 = compose_module.run_compose(
         "", settings=settings, use_ids=["police_station"]
     )
 
-    assert result_path1 != result_path2
-    assert result_path1.name == "overview.md"
-    assert result_path2.name == "overview_mut_variant.md"
+    assert outcome1.result_path != outcome2.result_path
+    assert outcome1.result_path.name == "overview.md"
+    assert outcome2.result_path.name == "overview_mut_variant.md"
     assert client.call_count == 3
 
 
@@ -209,10 +209,10 @@ def test_no_manifest_file_is_written(settings, fake_router, tmp_path):
     _seed_library(settings)
     fake_router(compose_module, FakeLLMClient(replies=["school_overview"]))
 
-    _slots, result_path = compose_module.run_compose("", settings=settings, use_ids=["school"])
+    outcome = compose_module.run_compose("", settings=settings, use_ids=["school"])
 
-    assert not result_path.with_name(result_path.stem + "_manifest.json").exists()
-    assert list(result_path.parent.glob("*.json")) == []
+    assert not outcome.result_path.with_name(outcome.result_path.stem + "_manifest.json").exists()
+    assert list(outcome.result_path.parent.glob("*.json")) == []
 
 
 def test_planning_call_includes_constraints_file_in_the_system_prompt(settings, fake_router, tmp_path):
@@ -335,15 +335,18 @@ def test_cancel_check_stops_before_any_slot_executes(settings, fake_router):
     fake_router(compose_module, client)
 
     events: list[ProgressEvent] = []
-    slots, result_path = compose_module.run_compose(
+    outcome = compose_module.run_compose(
         "need a hospital", settings=settings, on_progress=events.append, cancel_check=lambda: True
     )
 
-    assert result_path is None
-    assert slots[0].resolved_id is None
+    assert outcome.result_path is None
+    assert outcome.slots[0].resolved_id is None
     # target-count detection + keyword-extraction + the planning call -- the generate slot never runs
     assert client.call_count == 3
     assert any(e.kind == "cancelled" for e in events)
+    assert outcome.cancelled is True
+    assert outcome.result_id is None
+    assert outcome.content is None
 
 
 def test_cancel_check_mid_plan_keeps_earlier_slots_resolved(settings, fake_router):
@@ -368,13 +371,16 @@ def test_cancel_check_mid_plan_keeps_earlier_slots_resolved(settings, fake_route
         calls["n"] += 1
         return calls["n"] > 1  # False before slot 1, True before slot 2
 
-    slots, result_path = compose_module.run_compose(
+    outcome = compose_module.run_compose(
         "need law enforcement and lumber", settings=settings, cancel_check=cancel_after_first_slot
     )
 
-    assert result_path is None  # cancelled before the combined result could be saved
-    assert slots[0].resolved_id == "sheriff_station"  # slot 1 completed and stays saved
-    assert slots[1].resolved_id is None  # slot 2 never ran
+    assert outcome.result_path is None  # cancelled before the combined result could be saved
+    assert outcome.slots[0].resolved_id == "sheriff_station"  # slot 1 completed and stays saved
+    assert outcome.slots[1].resolved_id is None  # slot 2 never ran
+    assert outcome.cancelled is True
+    assert outcome.result_id is None
+    assert outcome.content is None
 
 
 def test_small_library_still_extracts_keywords_and_narrows(settings, fake_router):
@@ -473,9 +479,11 @@ def test_narrowing_top_n_is_identical_regardless_of_a_number_in_the_request(sett
         "give me projects that use Jira", settings=settings, on_progress=events_without_number.append
     )
 
-    narrowed_with = next(e.message for e in events_with_number if e.kind == "narrowing" and "Narrowed to" in e.message)
+    narrowed_with = next(
+        e.message for e in events_with_number if e.kind == "narrowing_done" and "Narrowed to" in e.message
+    )
     narrowed_without = next(
-        e.message for e in events_without_number if e.kind == "narrowing" and "Narrowed to" in e.message
+        e.message for e in events_without_number if e.kind == "narrowing_done" and "Narrowed to" in e.message
     )
     assert narrowed_with == narrowed_without
     assert "Narrowed to 6 of 6 block(s)" in narrowed_with
@@ -503,9 +511,9 @@ def test_pinned_slots_are_unaffected_by_a_large_library(settings, fake_router):
 
     # no NL request -> _plan_with_llm never runs, so keyword extraction never fires
     # regardless of library size
-    slots, result_path = compose_module.run_compose("", settings=settings, use_ids=["block_0"])
+    outcome = compose_module.run_compose("", settings=settings, use_ids=["block_0"])
 
-    assert slots[0].resolved_id == "block_0"
+    assert outcome.slots[0].resolved_id == "block_0"
     assert client.call_count == 1  # just the result-naming call
 
 
@@ -523,13 +531,38 @@ def test_compose_works_against_fake_block_and_result_storage(settings, fake_rout
     fake_storage(compose_module, block_store=fake_blocks, result_store=fake_results)
     fake_router(compose_module, FakeLLMClient(replies=["school_overview"]))
 
-    slots, result_path = compose_module.run_compose("", settings=settings, use_ids=["school"])
+    outcome = compose_module.run_compose("", settings=settings, use_ids=["school"])
 
-    assert slots[0].resolved_id == "school"
+    assert outcome.slots[0].resolved_id == "school"
     # a fake has no filesystem path -- None is the correct, honest result here
-    assert result_path is None
+    assert outcome.result_path is None
     saved = fake_results.load("school_overview")
     assert "## School" in saved.content
+
+
+def test_run_compose_returns_result_id_and_content_even_when_path_for_returns_none(
+    settings, fake_router, fake_storage
+):
+    """Regression test: SqliteResultStorage.path_for() always returns None, even on a
+    successful run -- FakeResultStorage mirrors that here. run_compose must still hand back
+    result_id/name/content directly rather than depending on a real filesystem path."""
+    from fakes import FakeBlockStorage, FakeResultStorage
+
+    fake_blocks = FakeBlockStorage()
+    fake_blocks.save(
+        Block(id="", body="## School\n\nTeaches children.\n\n**Rooms:**\n- Classroom\n"),
+        filename_stem="school",
+    )
+    fake_results = FakeResultStorage()
+    fake_storage(compose_module, block_store=fake_blocks, result_store=fake_results)
+    fake_router(compose_module, FakeLLMClient(replies=["school_overview"]))
+
+    outcome = compose_module.run_compose("", settings=settings, use_ids=["school"])
+
+    assert outcome.result_id is not None
+    assert outcome.name is not None
+    assert outcome.content is not None
+    assert outcome.result_path is None
 
 
 def test_dry_run_still_reports_the_plan_built_progress_line(settings, fake_router):
@@ -565,9 +598,9 @@ def test_count_with_no_pins_produces_exactly_that_many_slots(settings, fake_rout
     client = FakeLLMClient(replies=[unparseable_keywords_reply, plan, "result_name"])
     fake_router(compose_module, client)
 
-    slots, result_path = compose_module.run_compose("need some projects", settings=settings, count=3)
+    outcome = compose_module.run_compose("need some projects", settings=settings, count=3)
 
-    assert len(slots) == 3
+    assert len(outcome.slots) == 3
     # keyword-extraction call + plan call + result-naming call -- count skips
     # target-count-detection entirely, but narrowing still runs
     assert client.call_count == 3
@@ -580,9 +613,9 @@ def test_count_combined_with_pins_only_plans_the_remainder(settings, fake_router
     client = FakeLLMClient(replies=[unparseable_keywords_reply, plan, "result_name"])
     fake_router(compose_module, client)
 
-    slots, result_path = compose_module.run_compose("", settings=settings, use_ids=["school"], count=2)
+    outcome = compose_module.run_compose("", settings=settings, use_ids=["school"], count=2)
 
-    assert len(slots) == 2
+    assert len(outcome.slots) == 2
 
 
 def test_count_at_or_below_pinned_total_skips_the_planner_and_keeps_all_pins(settings, fake_router):
@@ -590,12 +623,12 @@ def test_count_at_or_below_pinned_total_skips_the_planner_and_keeps_all_pins(set
     client = FakeLLMClient(replies=["result_name"])
     fake_router(compose_module, client)
 
-    slots, result_path = compose_module.run_compose(
+    outcome = compose_module.run_compose(
         "", settings=settings, use_ids=["school", "police_station"], count=1
     )
 
-    assert len(slots) == 2
-    assert {s.resolved_id for s in slots} == {"school", "police_station"}
+    assert len(outcome.slots) == 2
+    assert {s.resolved_id for s in outcome.slots} == {"school", "police_station"}
     # only the result-naming call -- the planner is never invoked
     assert client.call_count == 1
 
@@ -614,9 +647,9 @@ def test_count_with_empty_request_still_invokes_the_planner_above_pinned_total(s
     client = FakeLLMClient(replies=[unparseable_keywords_reply, plan, "result_name"])
     fake_router(compose_module, client)
 
-    slots, result_path = compose_module.run_compose("", settings=settings, use_ids=["block_0"], count=3)
+    outcome = compose_module.run_compose("", settings=settings, use_ids=["block_0"], count=3)
 
-    assert len(slots) == 3
+    assert len(outcome.slots) == 3
 
 
 def test_zero_or_negative_count_is_rejected_before_any_llm_call(settings, fake_router):
@@ -648,9 +681,9 @@ def test_corrective_retry_fixes_a_wrong_step_count(settings, fake_router):
     client = FakeLLMClient(replies=[unparseable_keywords_reply, wrong_plan, fixed_plan, "result_name"])
     fake_router(compose_module, client)
 
-    slots, result_path = compose_module.run_compose("need two projects", settings=settings, count=2)
+    outcome = compose_module.run_compose("need two projects", settings=settings, count=2)
 
-    assert len(slots) == 2
+    assert len(outcome.slots) == 2
     assert client.call_count == 4
 
 
@@ -667,10 +700,10 @@ def test_deterministic_padding_when_retry_still_has_the_wrong_count(settings, fa
     fake_router(compose_module, client)
     fake_router(generate_module, client)
 
-    slots, result_path = compose_module.run_compose("need three projects", settings=settings, count=3)
+    outcome = compose_module.run_compose("need three projects", settings=settings, count=3)
 
-    assert len(slots) == 3
-    padded = [s for s in slots if s.action == "generate" and s.criteria == "need three projects"]
+    assert len(outcome.slots) == 3
+    padded = [s for s in outcome.slots if s.action == "generate" and s.criteria == "need three projects"]
     assert len(padded) == 2
     assert client.call_count == 6
 
@@ -689,9 +722,9 @@ def test_deterministic_truncation_when_retry_still_has_too_many(settings, fake_r
     client = FakeLLMClient(replies=[unparseable_keywords_reply, over_plan, over_plan, "result_name"])
     fake_router(compose_module, client)
 
-    slots, result_path = compose_module.run_compose("need one project", settings=settings, count=1)
+    outcome = compose_module.run_compose("need one project", settings=settings, count=1)
 
-    assert len(slots) == 1
+    assert len(outcome.slots) == 1
 
 
 def test_padding_still_respects_the_max_generate_cap(settings, fake_router):
@@ -719,9 +752,9 @@ def test_a_request_stated_count_is_honored_exactly(settings, fake_router):
     client = FakeLLMClient(replies=["2", unparseable_keywords_reply, plan, "result_name"])
     fake_router(compose_module, client)
 
-    slots, result_path = compose_module.run_compose("need exactly 2 projects for a small town", settings=settings)
+    outcome = compose_module.run_compose("need exactly 2 projects for a small town", settings=settings)
 
-    assert len(slots) == 2
+    assert len(outcome.slots) == 2
     assert client.call_count == 4
 
 
@@ -733,9 +766,9 @@ def test_a_hallucinated_request_count_falls_back_to_free_planning(settings, fake
     client = FakeLLMClient(replies=["5", unparseable_keywords_reply, plan, "result_name"])
     fake_router(compose_module, client)
 
-    slots, result_path = compose_module.run_compose("need projects for a small town", settings=settings)
+    outcome = compose_module.run_compose("need projects for a small town", settings=settings)
 
-    assert len(slots) == 1
+    assert len(outcome.slots) == 1
     assert client.call_count == 4
 
 
@@ -746,7 +779,54 @@ def test_no_stated_count_falls_back_to_free_planning_exactly_as_before(settings,
     client = FakeLLMClient(replies=["NONE", unparseable_keywords_reply, plan, "result_name"])
     fake_router(compose_module, client)
 
-    slots, result_path = compose_module.run_compose("need projects for a small town", settings=settings)
+    outcome = compose_module.run_compose("need projects for a small town", settings=settings)
 
-    assert len(slots) == 1
+    assert len(outcome.slots) == 1
     assert client.call_count == 4
+
+
+def test_plan_event_carries_structured_step_list_before_execution(settings, fake_router):
+    _seed_library(settings)
+    plan = json.dumps(
+        {
+            "steps": [
+                {"order": 1, "action": "mutate", "block_id": "police_station", "criteria": "adapt"},
+                {"order": 2, "action": "generate", "block_id": None, "criteria": "a sawmill"},
+            ]
+        }
+    )
+    mutate_reply = "===BODY===\n## Sheriff Station\n\nAdapted.\n\n**Rooms:**\n- Office\n===LABEL===\nsheriff"
+    generate_reply = "## Sawmill\n\nCuts logs.\n\n**Rooms:**\n- Saw room\n"
+    unparseable_keywords_reply = "I cannot help with that."
+    client = FakeLLMClient(
+        replies=["NONE", unparseable_keywords_reply, plan, mutate_reply, generate_reply, "town_result"]
+    )
+    fake_router(compose_module, client)
+    fake_router(mutate_module, client)
+    fake_router(generate_module, client)
+
+    events: list[ProgressEvent] = []
+    compose_module.run_compose(
+        "need law enforcement and lumber", settings=settings, on_progress=events.append
+    )
+
+    plan_events = [e for e in events if e.kind == "plan"]
+    assert len(plan_events) == 1
+    steps = plan_events[0].data["steps"]
+    assert steps == [
+        {"order": 1, "action": "mutate", "block_id": "police_station", "criteria": "adapt"},
+        {"order": 2, "action": "generate", "block_id": None, "criteria": "a sawmill"},
+    ]
+    for step in steps:
+        assert set(step.keys()) == {"order", "action", "block_id", "criteria"}
+        assert "resolved_id" not in step
+
+    plan_done_index = next(i for i, e in enumerate(events) if e.kind == "plan_done")
+    plan_index = next(i for i, e in enumerate(events) if e.kind == "plan")
+    first_step_index = next(i for i, e in enumerate(events) if e.kind in ("use", "mutate_start", "generate_start"))
+    assert plan_done_index < plan_index < first_step_index
+
+    plan_done_index = next(i for i, e in enumerate(events) if e.kind == "plan_done")
+    plan_index = next(i for i, e in enumerate(events) if e.kind == "plan")
+    first_step_index = next(i for i, e in enumerate(events) if e.kind in ("mutate_start", "generate_start"))
+    assert plan_done_index < plan_index < first_step_index

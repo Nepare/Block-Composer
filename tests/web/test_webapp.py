@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from google.oauth2.credentials import Credentials
 
+from tools import compose as compose_module
 from tools import dissect as dissect_module
 from tools import docs_api
 from tools import generate as generate_module
@@ -231,6 +232,216 @@ def test_dissect_start_rejects_when_not_connected(settings, monkeypatch):
     assert len(web_jobs._jobs) == jobs_before
 
 
+def test_compose_start_runs_in_background_and_saves(settings, monkeypatch, fake_router):
+    FilesystemBlockStorage(settings.blocks_path).save(
+        Block(id="", body="## School\n\nTeaches children.\n\n**Rooms:**\n- Classroom\n"),
+        filename_stem="school",
+    )
+    client = _client(settings, monkeypatch)
+    plan = json.dumps(
+        {
+            "steps": [
+                {"order": 1, "action": "use", "block_id": "school", "criteria": None},
+                {"order": 2, "action": "generate", "block_id": None, "criteria": "a sawmill"},
+            ]
+        }
+    )
+    unparseable_keywords_reply = "I cannot help with that."
+    generate_reply = "## Sawmill\n\nCuts logs.\n\n**Rooms:**\n- Saw room\n"
+    # explicit count skips the target-count-detection call entirely -- reply order is
+    # keyword extraction, planning, the generate step's own body, then result naming
+    llm = FakeLLMClient(replies=[unparseable_keywords_reply, plan, generate_reply, "school_and_sawmill"])
+    fake_router(compose_module, llm)
+    fake_router(generate_module, llm)
+
+    response = client.post(
+        "/compose/start",
+        params={"key": "test-key"},
+        json={"request": "need a school and a sawmill", "count": 2},
+    )
+
+    assert response.status_code == 200
+    job = _wait_for_job(response.json()["job_id"])
+    assert job.status == "done"
+    outcome = job.outcome
+    assert outcome["cancelled"] is False
+    assert outcome["result_id"] is not None
+    assert outcome["name"] is not None
+    assert outcome["content"] is not None
+    assert len(outcome["slots"]) == 2
+    assert all(slot["resolved_id"] is not None for slot in outcome["slots"])
+
+
+def test_compose_start_rejects_all_empty(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+    jobs_before = len(web_jobs._jobs)
+
+    response = client.post(
+        "/compose/start",
+        params={"key": "test-key"},
+        json={"request": "", "specifiers": "", "use_ids": [], "generate_criteria": []},
+    )
+
+    assert response.status_code == 400
+    assert response.text == (
+        "compose needs a request, specifiers, use_ids, or generate_criteria — "
+        "nothing to do with all empty."
+    )
+    assert len(web_jobs._jobs) == jobs_before
+
+
+def test_compose_start_rejects_unknown_use_id(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+    jobs_before = len(web_jobs._jobs)
+
+    response = client.post(
+        "/compose/start", params={"key": "test-key"}, json={"use_ids": ["does-not-exist"]}
+    )
+
+    assert response.status_code == 400
+    assert len(web_jobs._jobs) == jobs_before
+
+
+def test_compose_start_rejects_non_positive_count(settings, monkeypatch):
+    FilesystemBlockStorage(settings.blocks_path).save(
+        Block(id="", body="## School\n\nTeaches children.\n\n**Rooms:**\n- Classroom\n"),
+        filename_stem="school",
+    )
+    client = _client(settings, monkeypatch)
+
+    for count in (0, -1):
+        jobs_before = len(web_jobs._jobs)
+        response = client.post(
+            "/compose/start",
+            params={"key": "test-key"},
+            json={"use_ids": ["school"], "count": count},
+        )
+        assert response.status_code == 400
+        assert response.text == f"count must be a positive integer, got {count}."
+        assert len(web_jobs._jobs) == jobs_before
+
+
+def test_compose_start_rejects_missing_key(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+    jobs_before = len(web_jobs._jobs)
+
+    response = client.post("/compose/start", json={"use_ids": []})
+
+    assert response.status_code == 422
+    assert len(web_jobs._jobs) == jobs_before
+
+
+def test_compose_start_rejects_wrong_key(settings, monkeypatch):
+    FilesystemBlockStorage(settings.blocks_path).save(
+        Block(id="", body="## School\n\nTeaches children.\n\n**Rooms:**\n- Classroom\n"),
+        filename_stem="school",
+    )
+    client = _client(settings, monkeypatch)
+    jobs_before = len(web_jobs._jobs)
+
+    response = client.post(
+        "/compose/start", params={"key": "wrong-key"}, json={"use_ids": ["school"]}
+    )
+
+    assert response.status_code == 401
+    assert len(web_jobs._jobs) == jobs_before
+
+
+def test_cancel_stops_mid_run_and_keeps_completed_work(settings, monkeypatch, fake_router):
+    FilesystemBlockStorage(settings.blocks_path).save(
+        Block(id="", body="## Police Station\n\nRegular station.\n\n**Rooms:**\n- Office\n"),
+        filename_stem="police_station",
+    )
+    client = _client(settings, monkeypatch)
+    plan = json.dumps(
+        {
+            "steps": [
+                {"order": 1, "action": "mutate", "block_id": "police_station", "criteria": "adapt"},
+                {"order": 2, "action": "generate", "block_id": None, "criteria": "a sawmill"},
+            ]
+        }
+    )
+    mutate_reply = (
+        "===BODY===\n## Sheriff Station\n\nAdapted.\n\n**Rooms:**\n- Office\n===LABEL===\nsheriff"
+    )
+    unparseable_keywords_reply = "I cannot help with that."
+    job_id_holder: dict[str, str] = {}
+
+    class CancellingClient(FakeLLMClient):
+        # Fires the real /cancel HTTP call from inside the compose background thread, right
+        # after the mutate step's own reply is delivered -- deterministic (no sleep/race):
+        # by the time run_compose's loop reaches slot 2's cancel_check, cancellation is set.
+        def chat(self, messages, model, **kwargs):
+            reply = super().chat(messages, model, **kwargs)
+            if reply == mutate_reply:
+                while "id" not in job_id_holder:
+                    time.sleep(0.001)
+                client.post(f"/cancel/{job_id_holder['id']}", params={"key": "test-key"})
+            return reply
+
+    llm = CancellingClient(replies=["NONE", unparseable_keywords_reply, plan, mutate_reply])
+    fake_router(compose_module, llm)
+    fake_router(mutate_module, llm)
+
+    response = client.post(
+        "/compose/start", params={"key": "test-key"}, json={"request": "need law enforcement and lumber"}
+    )
+    job_id = response.json()["job_id"]
+    job_id_holder["id"] = job_id
+
+    job = _wait_for_job(job_id)
+
+    assert job.status == "cancelled"
+    outcome = job.outcome
+    assert outcome["cancelled"] is True
+    assert outcome["result_id"] is None
+    assert outcome["name"] is None
+    assert outcome["content"] is None
+    slots = {s["order"]: s for s in outcome["slots"]}
+    assert slots[1]["resolved_id"] == "sheriff_station"
+    assert slots[2]["resolved_id"] is None
+    assert FilesystemBlockStorage(settings.blocks_path).exists("sheriff_station")
+
+
+def test_cancel_rejected_for_non_cancellable_job(settings, monkeypatch, fake_router):
+    client = _client(settings, monkeypatch)
+    llm = FakeLLMClient(replies=["## Sheriff Outpost\n\nA frontier outpost.\n\n**Role:** nobody\n"])
+    fake_router(generate_module, llm)
+    start = client.post("/generate/start", params={"key": "test-key"}, json={"criteria": "a sheriff outpost"})
+    job_id = start.json()["job_id"]
+    _wait_for_job(job_id)
+
+    response = client.post(f"/cancel/{job_id}", params={"key": "test-key"})
+
+    assert response.status_code == 400
+    assert response.text == "This operation does not support cancellation."
+
+
+def test_cancel_rejected_for_already_finished_job(settings, monkeypatch, fake_router):
+    FilesystemBlockStorage(settings.blocks_path).save(
+        Block(id="", body="## School\n\nTeaches children.\n\n**Rooms:**\n- Classroom\n"),
+        filename_stem="school",
+    )
+    client = _client(settings, monkeypatch)
+    fake_router(compose_module, FakeLLMClient(replies=["school_result"]))
+    start = client.post("/compose/start", params={"key": "test-key"}, json={"use_ids": ["school"]})
+    job_id = start.json()["job_id"]
+    _wait_for_job(job_id)
+
+    response = client.post(f"/cancel/{job_id}", params={"key": "test-key"})
+
+    assert response.status_code == 400
+    assert response.text == "This operation is no longer running."
+
+
+def test_cancel_rejected_for_unknown_job_id(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+
+    response = client.post("/cancel/does-not-exist", params={"key": "test-key"})
+
+    assert response.status_code == 404
+
+
 def test_generate_start_rejects_empty_criteria(settings, monkeypatch):
     client = _client(settings, monkeypatch)
 
@@ -322,6 +533,59 @@ def test_mutate_stream_delivers_progress_then_done_outcome(settings, monkeypatch
     kinds = [payload["kind"] for kind, payload in parsed if kind == "data"]
     assert "mutate_start" in kinds
     assert parsed[-1] == ("complete", {"status": "done", "block_id": "police_station_mut_renovated"})
+
+
+def test_compose_stream_delivers_events_in_expected_order(settings, monkeypatch, fake_router):
+    FilesystemBlockStorage(settings.blocks_path).save(
+        Block(id="", body="## Block Zero\n\nFirst block.\n\n**Rooms:**\n- Room\n"), filename_stem="block_0"
+    )
+    FilesystemBlockStorage(settings.blocks_path).save(
+        Block(id="", body="## Block One\n\nSecond block.\n\n**Rooms:**\n- Room\n"), filename_stem="block_1"
+    )
+    client = _client(settings, monkeypatch)
+    keywords_reply = "ROLE: \nENVIRONMENT: Jira\nRESPONSIBILITIES: \nDOMAIN: \n"
+    plan = json.dumps(
+        {
+            "steps": [
+                {"order": 1, "action": "use", "block_id": "block_0", "criteria": None},
+                {"order": 2, "action": "use", "block_id": "block_1", "criteria": None},
+            ]
+        }
+    )
+    llm = FakeLLMClient(replies=[keywords_reply, plan, "two_blocks_result"])
+    fake_router(compose_module, llm)
+
+    start = client.post(
+        "/compose/start",
+        params={"key": "test-key"},
+        json={"request": "need two blocks that use Jira", "count": 2},
+    )
+    job_id = start.json()["job_id"]
+
+    parsed = _stream(client, f"/stream/{job_id}?key=test-key")
+    data_events = [payload for kind, payload in parsed if kind == "data"]
+    kinds = [payload["kind"] for payload in data_events]
+
+    def first_index(kind):
+        return kinds.index(kind)
+
+    assert first_index("keyword_extraction_start") < first_index("keyword_extraction_done")
+    assert first_index("keyword_extraction_done") < first_index("narrowing_done")
+    assert first_index("narrowing_done") < first_index("plan_start")
+    assert first_index("plan_start") < first_index("plan_done")
+    assert first_index("plan_done") < first_index("plan")
+    assert first_index("plan") < first_index("use")
+    assert kinds.count("use") == 2
+    assert first_index("use") < first_index("naming")
+
+    plan_payload = next(payload for payload in data_events if payload["kind"] == "plan")
+    assert plan_payload["data"]["steps"] == [
+        {"order": 1, "action": "use", "block_id": "block_0", "criteria": None},
+        {"order": 2, "action": "use", "block_id": "block_1", "criteria": None},
+    ]
+
+    assert parsed[-1][0] == "complete"
+    assert parsed[-1][1]["status"] == "done"
 
 
 def test_generate_stream_reports_error_outcome_on_exhausted_retry(settings, monkeypatch, fake_router):
@@ -553,4 +817,73 @@ def test_stream_route_behaves_identically_across_all_three_tools(settings, monke
         assert parsed[-1][1]["status"] == "done"
 
     response = client.get("/stream/does-not-exist", params={"key": "test-key"})
+    assert response.status_code == 404
+
+
+def test_stream_and_cancel_behave_consistently_across_all_four_tools(settings, monkeypatch, fake_router):
+    client = _client(settings, monkeypatch)
+
+    fake_router(
+        generate_module, FakeLLMClient(replies=["## Sheriff Outpost\n\nA frontier outpost.\n\n**Role:** nobody\n"])
+    )
+    gen_start = client.post("/generate/start", params={"key": "test-key"}, json={"criteria": "a sheriff outpost"})
+    gen_job_id = gen_start.json()["job_id"]
+    _wait_for_job(gen_job_id)
+
+    FilesystemBlockStorage(settings.blocks_path).save(
+        Block(id="", body="## Watchtower\n\nRegular tower.\n\n**Rooms:**\n- Deck\n"),
+        filename_stem="watchtower",
+    )
+    fake_router(
+        mutate_module,
+        FakeLLMClient(
+            replies=[
+                "===BODY===\n## Watchtower\n\nRenovated tower.\n\n**Rooms:**\n- Deck\n"
+                "- Armory\n===LABEL===\nrenovated\n"
+            ]
+        ),
+    )
+    mut_start = client.post(
+        "/mutate/start", params={"key": "test-key"}, json={"block_id": "watchtower", "criteria": "add an armory"}
+    )
+    mut_job_id = mut_start.json()["job_id"]
+    _wait_for_job(mut_job_id)
+
+    document = _load_dissect_fixture()
+    monkeypatch.setattr(docs_api, "get_document", lambda doc_id, settings=None: document)
+    monkeypatch.setattr(webapp, "get_auth_provider", lambda s: _connected_provider(s))
+    fake_router(dissect_module, FakeLLMClient())
+    dis_start = client.post("/dissect/start", params={"key": "test-key"}, json={"doc": "doc1"})
+    dis_job_id = dis_start.json()["job_id"]
+    _wait_for_job(dis_job_id)
+
+    FilesystemBlockStorage(settings.blocks_path).save(
+        Block(id="", body="## School\n\nTeaches children.\n\n**Rooms:**\n- Classroom\n"),
+        filename_stem="school",
+    )
+    fake_router(compose_module, FakeLLMClient(replies=["school_result"]))
+    comp_start = client.post("/compose/start", params={"key": "test-key"}, json={"use_ids": ["school"]})
+    comp_job_id = comp_start.json()["job_id"]
+    _wait_for_job(comp_job_id)
+
+    for job_id in (gen_job_id, mut_job_id, dis_job_id, comp_job_id):
+        parsed = _stream(client, f"/stream/{job_id}?key=test-key")
+        data_events = [payload for kind, payload in parsed if kind == "data"]
+        assert len(data_events) >= 1
+        assert parsed[-1][0] == "complete"
+        assert parsed[-1][1]["status"] == "done"
+
+    response = client.get("/stream/does-not-exist", params={"key": "test-key"})
+    assert response.status_code == 404
+
+    for job_id in (gen_job_id, mut_job_id, dis_job_id):
+        response = client.post(f"/cancel/{job_id}", params={"key": "test-key"})
+        assert response.status_code == 400
+        assert response.text == "This operation does not support cancellation."
+
+    response = client.post(f"/cancel/{comp_job_id}", params={"key": "test-key"})
+    assert response.status_code == 400
+    assert response.text == "This operation is no longer running."
+
+    response = client.post("/cancel/does-not-exist", params={"key": "test-key"})
     assert response.status_code == 404

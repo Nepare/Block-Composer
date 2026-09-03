@@ -6,6 +6,7 @@ from typer.testing import CliRunner
 
 import cli
 from core.config import Settings
+from tools.compose import ComposeOutcome
 
 MOCK_TEMPLATES = Path(__file__).resolve().parent / "fixtures" / "templates.yaml"
 
@@ -59,7 +60,7 @@ def test_compose_request_file_is_read_and_passed_through(tmp_path, cli_settings,
 
     def fake_run_compose(request, **kwargs):
         captured["request"] = request
-        return [], None
+        return ComposeOutcome(slots=[], result_path=None, result_id=None, name=None, content=None, cancelled=False)
 
     monkeypatch.setattr(cli.compose_module, "run_compose", fake_run_compose)
 
@@ -74,7 +75,7 @@ def test_compose_count_is_passed_through(tmp_path, cli_settings, monkeypatch):
 
     def fake_run_compose(request, **kwargs):
         captured["count"] = kwargs.get("count")
-        return [], None
+        return ComposeOutcome(slots=[], result_path=None, result_id=None, name=None, content=None, cancelled=False)
 
     monkeypatch.setattr(cli.compose_module, "run_compose", fake_run_compose)
 
@@ -89,7 +90,7 @@ def test_compose_count_defaults_to_none(tmp_path, cli_settings, monkeypatch):
 
     def fake_run_compose(request, **kwargs):
         captured["count"] = kwargs.get("count")
-        return [], None
+        return ComposeOutcome(slots=[], result_path=None, result_id=None, name=None, content=None, cancelled=False)
 
     monkeypatch.setattr(cli.compose_module, "run_compose", fake_run_compose)
 

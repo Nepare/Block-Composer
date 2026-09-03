@@ -5,6 +5,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse,
 from pydantic import BaseModel, ConfigDict, Field
 import uvicorn
 
+from tools import compose as compose_module
 from tools import dissect as dissect_module
 from tools import generate as generate_module
 from tools import mutate as mutate_module
@@ -91,6 +92,16 @@ class DissectStartRequest(BaseModel):
     doc: str
 
 
+class ComposeStartRequest(BaseModel):
+    request: str = ""
+    specifiers: str = ""
+    use_ids: list[str] = []
+    generate_criteria: list[str] = []
+    count: int | None = None
+    model: str | None = None
+    max_generate: int | None = None
+
+
 @app.post("/generate/start")
 def generate_start(payload: GenerateStartRequest, key: str):
     settings = load_settings()
@@ -106,7 +117,7 @@ def generate_start(payload: GenerateStartRequest, key: str):
     except CvdocsError as exc:
         return PlainTextResponse(str(exc), status_code=400)
 
-    def work(on_progress):
+    def work(on_progress, _cancel_event):
         block, decision, stem = generate_module.run_generate(
             payload.criteria,
             settings=settings,
@@ -138,7 +149,7 @@ def mutate_start(payload: MutateStartRequest, key: str):
     if not payload.criteria.strip():
         return PlainTextResponse("criteria must not be empty.", status_code=400)
 
-    def work(on_progress):
+    def work(on_progress, _cancel_event):
         _block, stem = mutate_module.run_mutate(
             payload.block_id,
             payload.criteria,
@@ -172,7 +183,7 @@ def dissect_start(payload: DissectStartRequest, key: str):
     except AuthError as exc:
         return PlainTextResponse(str(exc), status_code=400)
 
-    def work(on_progress):
+    def work(on_progress, _cancel_event):
         result = dissect_module.run_dissect(payload.doc, settings=settings, on_progress=on_progress)
         return {
             "saved": [{"block_id": stem, "name": block.name} for block, stem in result.saved],
@@ -189,6 +200,64 @@ def dissect_start(payload: DissectStartRequest, key: str):
     return {"job_id": job.id}
 
 
+@app.post("/compose/start")
+def compose_start(payload: ComposeStartRequest, key: str):
+    settings = load_settings()
+    if not _authorized(settings, key):
+        return PlainTextResponse("Unauthorized", status_code=401)
+
+    request = payload.request.strip()
+    specifiers = payload.specifiers.strip()
+    if specifiers and request:
+        merged_request = f"{request}\n\nAdditional notes from the user: {specifiers}"
+    elif specifiers:
+        merged_request = specifiers
+    else:
+        merged_request = request
+
+    store = get_block_storage(settings)
+    try:
+        for uid in payload.use_ids:
+            store.load(uid)
+    except CvdocsError as exc:
+        return PlainTextResponse(str(exc), status_code=400)
+
+    if not merged_request and not payload.use_ids and not payload.generate_criteria:
+        return PlainTextResponse(
+            "compose needs a request, specifiers, use_ids, or generate_criteria — nothing to do with all empty.",
+            status_code=400,
+        )
+
+    if payload.count is not None and payload.count <= 0:
+        return PlainTextResponse(f"count must be a positive integer, got {payload.count}.", status_code=400)
+
+    def work(on_progress, cancel_event):
+        outcome = compose_module.run_compose(
+            merged_request,
+            settings=settings,
+            use_ids=payload.use_ids,
+            generate_criteria=payload.generate_criteria,
+            count=payload.count,
+            model_spec=payload.model,
+            max_generate=payload.max_generate if payload.max_generate is not None else 8,
+            on_progress=on_progress,
+            cancel_check=cancel_event.is_set,
+        )
+        return {
+            "result_id": outcome.result_id,
+            "name": outcome.name,
+            "content": outcome.content,
+            "cancelled": outcome.cancelled,
+            "slots": [
+                {"order": s.order, "action": s.action, "block_id": s.block_id, "criteria": s.criteria, "resolved_id": s.resolved_id}
+                for s in outcome.slots
+            ],
+        }
+
+    job = web_jobs.start_job(work, cancellable=True)
+    return {"job_id": job.id}
+
+
 @app.get("/stream/{job_id}")
 async def stream(job_id: str, key: str):
     settings = load_settings()
@@ -200,6 +269,26 @@ async def stream(job_id: str, key: str):
         return PlainTextResponse("Unknown job id", status_code=404)
 
     return StreamingResponse(web_jobs.sse_events(job), media_type="text/event-stream")
+
+
+@app.post("/cancel/{job_id}")
+def cancel(job_id: str, key: str):
+    settings = load_settings()
+    if not _authorized(settings, key):
+        return PlainTextResponse("Unauthorized", status_code=401)
+
+    job = web_jobs.get_job(job_id)
+    if job is None:
+        return PlainTextResponse("Unknown job id", status_code=404)
+
+    if job.cancel_event is None:
+        return PlainTextResponse("This operation does not support cancellation.", status_code=400)
+
+    if job.status != "running":
+        return PlainTextResponse("This operation is no longer running.", status_code=400)
+
+    job.cancel_event.set()
+    return {"status": "cancelling"}
 
 
 def _check_required_env(settings) -> None:

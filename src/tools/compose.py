@@ -26,6 +26,16 @@ class ComposeSlot:
     resolved_id: str | None = None
 
 
+@dataclass
+class ComposeOutcome:
+    slots: list[ComposeSlot]
+    result_path: Path | None
+    result_id: str | None
+    name: str | None
+    content: str | None
+    cancelled: bool
+
+
 def _catalog(blocks: list[Block]) -> list[dict]:
     """Pure formatter — narrowing (if any) already happened in _select_candidate_blocks."""
     return [{"id": b.id, "tags": b.tags, "body": b.body.strip()} for b in blocks]
@@ -45,7 +55,7 @@ def _select_candidate_blocks(
         settings.llm.models.keywords, settings, on_progress=progress
     )
     keywords_constraints = constraints_module.load(settings, "keywords")
-    progress(ProgressEvent(kind="keyword_extraction", message="Extracting search keywords from request…"))
+    progress(ProgressEvent(kind="keyword_extraction_start", message="Extracting search keywords from request…"))
     signals = extract_retrieval_signals(
         request,
         keywords_client,
@@ -58,14 +68,14 @@ def _select_candidate_blocks(
     if keywords.is_empty():
         progress(
             ProgressEvent(
-                kind="keyword_extraction", message="No usable keywords extracted — searching the full library"
+                kind="keyword_extraction_done", message="No usable keywords extracted — searching the full library"
             )
         )
         return blocks
 
     progress(
         ProgressEvent(
-            kind="keyword_extraction",
+            kind="keyword_extraction_done",
             message=(
                 f"Keywords — role: {', '.join(keywords.role) or '—'}; "
                 f"environment: {', '.join(keywords.environment) or '—'}; "
@@ -80,7 +90,7 @@ def _select_candidate_blocks(
     )
     progress(
         ProgressEvent(
-            kind="narrowing", message=f"Narrowed to {len(narrowed)} of {len(blocks)} block(s) in the library"
+            kind="narrowing_done", message=f"Narrowed to {len(narrowed)} of {len(blocks)} block(s) in the library"
         )
     )
     return narrowed
@@ -205,7 +215,7 @@ def run_compose(
     dry_run: bool = False,
     on_progress: ProgressSink | None = None,
     cancel_check: Callable[[], bool] | None = None,
-) -> tuple[list[ComposeSlot], Path | None]:
+) -> ComposeOutcome:
     """`cancel_check`, if given, is polled between slots — a True stops execution before the
     next slot, keeping any blocks/mutations already produced but skipping the final result."""
     progress = on_progress or (lambda _event: None)
@@ -277,12 +287,26 @@ def run_compose(
             ),
         )
     )
+    progress(
+        ProgressEvent(
+            kind="plan",
+            message="Composition plan finalized.",
+            data={
+                "steps": [
+                    {"order": s.order, "action": s.action, "block_id": s.block_id, "criteria": s.criteria}
+                    for s in sorted(all_slots, key=lambda s: s.order)
+                ]
+            },
+        )
+    )
 
     if dry_run:
         for slot in all_slots:
             if slot.action in ("use", "pinned_use"):
                 slot.resolved_id = slot.block_id
-        return all_slots, None
+        return ComposeOutcome(
+            slots=all_slots, result_path=None, result_id=None, name=None, content=None, cancelled=False
+        )
 
     total = len(all_slots)
     for i, slot in enumerate(sorted(all_slots, key=lambda s: s.order), start=1):
@@ -295,7 +319,14 @@ def run_compose(
                     total=total,
                 )
             )
-            return sorted(all_slots, key=lambda s: s.order), None
+            return ComposeOutcome(
+                slots=sorted(all_slots, key=lambda s: s.order),
+                result_path=None,
+                result_id=None,
+                name=None,
+                content=None,
+                cancelled=True,
+            )
 
         if slot.action in ("use", "pinned_use"):
             slot.resolved_id = slot.block_id
@@ -323,7 +354,14 @@ def run_compose(
                         total=total,
                     )
                 )
-                return sorted(all_slots, key=lambda s: s.order), None
+                return ComposeOutcome(
+                    slots=sorted(all_slots, key=lambda s: s.order),
+                    result_path=None,
+                    result_id=None,
+                    name=None,
+                    content=None,
+                    cancelled=True,
+                )
             slot.resolved_id = stem
             progress(
                 ProgressEvent(
@@ -350,7 +388,14 @@ def run_compose(
                         total=total,
                     )
                 )
-                return sorted(all_slots, key=lambda s: s.order), None
+                return ComposeOutcome(
+                    slots=sorted(all_slots, key=lambda s: s.order),
+                    result_path=None,
+                    result_id=None,
+                    name=None,
+                    content=None,
+                    cancelled=True,
+                )
             slot.resolved_id = stem or decision.duplicate_of
             progress(
                 ProgressEvent(
@@ -366,7 +411,7 @@ def run_compose(
     content = "\n\n---\n\n".join(bodies)
 
     progress(ProgressEvent(kind="naming", message="Naming result…"))
-    result_path = _save_result(
+    result_id, name, result_path = _save_result(
         content,
         settings,
         out_path,
@@ -376,7 +421,9 @@ def run_compose(
         generate_criteria=generate_criteria,
         slots=ordered,
     )
-    return ordered, result_path
+    return ComposeOutcome(
+        slots=ordered, result_path=result_path, result_id=result_id, name=name, content=content, cancelled=False
+    )
 
 
 def _generate_result_name(content: str, settings: Settings, progress: ProgressSink) -> str:
@@ -403,12 +450,12 @@ def _save_result(
     use_ids: list[str],
     generate_criteria: list[str],
     slots: list[ComposeSlot],
-) -> Path:
+) -> tuple[str | None, str | None, Path | None]:
     """`out_path`, if given, bypasses ResultStorage and writes exactly there instead."""
     if out_path:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(content, encoding="utf-8")
-        return out_path
+        return None, None, out_path
 
     title = _generate_result_name(content, settings, progress)
     result_store = get_result_storage(settings)
@@ -439,4 +486,4 @@ def _save_result(
         naming_constraints=naming_constraints,
     )
     final_stem = stem or decision.duplicate_of
-    return result_store.path_for(final_stem)
+    return final_stem, title, result_store.path_for(final_stem)

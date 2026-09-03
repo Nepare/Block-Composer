@@ -202,7 +202,7 @@ def compose(
         raise typer.Exit(1)
 
     try:
-        slots, result_path = compose_module.run_compose(
+        outcome = compose_module.run_compose(
             request_text,
             settings=settings,
             use_ids=use,
@@ -219,7 +219,7 @@ def compose(
         raise typer.Exit(1)
 
     tree = Tree("Compose plan")
-    for slot in sorted(slots, key=lambda s: s.order):
+    for slot in sorted(outcome.slots, key=lambda s: s.order):
         label = slot.resolved_id or slot.block_id or "(pending)"
         line = f"[{slot.order}] {slot.action} -> {label}"
         if slot.criteria:
@@ -229,8 +229,8 @@ def compose(
 
     if dry_run:
         console.print("[yellow]Dry run — nothing written.[/yellow]")
-    elif result_path:
-        console.print(f"[green]Written[/green] {escape(str(result_path))}")
+    elif outcome.result_path:
+        console.print(f"[green]Written[/green] {escape(str(outcome.result_path))}")
     else:
         console.print("[green]Saved.[/green]")
 

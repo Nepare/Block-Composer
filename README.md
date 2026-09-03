@@ -197,8 +197,8 @@ default for that one call, e.g. `--model openrouter:z-ai/glm-5.3` or
 Requires the hosted deployment from [Setup 3.2](#32-hosted-deployment-docker)
 (Docker, Web OAuth client, `CVDOCS_API_KEY`).
 
-Once the service is running, `generate`, `mutate`, and `dissect` are reachable over HTTP,
-gated by the same `?key=<CVDOCS_API_KEY>` credential as `/auth/google/login`:
+Once the service is running, `generate`, `mutate`, `dissect`, and `compose` are reachable over
+HTTP, gated by the same `?key=<CVDOCS_API_KEY>` credential as `/auth/google/login`:
 
 - `POST /generate/start` / `POST /mutate/start` / `POST /dissect/start` — same inputs as the
   CLI's `generate`/`mutate`/`dissect` commands (JSON body), return `{"job_id": "..."}`
@@ -206,11 +206,24 @@ gated by the same `?key=<CVDOCS_API_KEY>` credential as `/auth/google/login`:
   immediately, before any work starts, if the deployment isn't configured for hosted-mode
   Google connections, or is configured but has no valid stored connection yet — run the
   `/auth/google/login` flow from [3.2](#32-hosted-deployment-docker) first.
-- `GET /stream/{job_id}` — a single Server-Sent Events route shared across all three tools,
+- `POST /compose/start` — same inputs as the CLI's `compose` command, plus a `specifiers` field
+  (a shorter free-text field merged into `request` server-side) — accepts `request`,
+  `specifiers`, `use_ids`, `generate_criteria`, `count` (`null` lets the model decide), `model`,
+  and `max_generate`; no filesystem output path or dry-run mode over HTTP. Also returns
+  `{"job_id": "..."}` immediately. Unlike the other three tools, a compose run is cancellable —
+  see `POST /cancel/{job_id}` below. Its final outcome includes the finished document's
+  `content`, saved `name`/`result_id`, and the ordered `slots` that produced it (`result_id`/
+  `name`/`content` are `null` if the run was cancelled instead of completing).
+- `GET /stream/{job_id}` — a single Server-Sent Events route shared across all four tools,
   streaming that run's progress and ending in one final `event: complete` line with the
-  outcome (the produced block's id(s), or an error). Reconnecting after a run has already
-  finished still replays its full history. None of the three tools has a cancel endpoint —
-  each is a single short LLM call chain, not worth interrupting mid-flight.
+  outcome (the produced block's id(s), the composed document, or an error). Reconnecting after
+  a run has already finished still replays its full history.
+- `POST /cancel/{job_id}` — a generic cancellation endpoint. Only compose jobs support it today;
+  cancelling a generate/mutate/dissect job (or a compose job that's no longer running) returns
+  `400` with a reason rather than silently doing nothing. Cancelling a running compose job stops
+  it at its next step boundary, keeps every block/mutation already produced, and reports
+  `"status": "cancelled"` on the stream's terminal event — generate/mutate/dissect stay
+  cancel-less, each being a single short LLM call chain not worth interrupting mid-flight.
 
 ```
 curl -X POST "http://localhost:8000/generate/start?key=<CVDOCS_API_KEY>" \
