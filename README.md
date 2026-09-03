@@ -197,17 +197,20 @@ default for that one call, e.g. `--model openrouter:z-ai/glm-5.3` or
 Requires the hosted deployment from [Setup 3.2](#32-hosted-deployment-docker)
 (Docker, Web OAuth client, `CVDOCS_API_KEY`).
 
-Once the service is running, `generate` and `mutate` are reachable over HTTP, gated by the
-same `?key=<CVDOCS_API_KEY>` credential as `/auth/google/login`:
+Once the service is running, `generate`, `mutate`, and `dissect` are reachable over HTTP,
+gated by the same `?key=<CVDOCS_API_KEY>` credential as `/auth/google/login`:
 
-- `POST /generate/start` / `POST /mutate/start` — same inputs as the CLI's `generate`/`mutate`
-  commands (JSON body), return `{"job_id": "..."}` immediately rather than blocking until the
-  LLM call finishes.
-- `GET /generate/stream/{job_id}` / `GET /mutate/stream/{job_id}` — a Server-Sent Events stream
-  of that run's progress, ending in one final `event: complete` line with the outcome (the
-  produced block's id, or an error). Reconnecting after a run has already finished still
-  replays its full history. Neither tool has a cancel endpoint — each is a single short LLM
-  call chain, not worth interrupting mid-flight.
+- `POST /generate/start` / `POST /mutate/start` / `POST /dissect/start` — same inputs as the
+  CLI's `generate`/`mutate`/`dissect` commands (JSON body), return `{"job_id": "..."}`
+  immediately rather than blocking until the LLM call finishes. `dissect` additionally rejects
+  immediately, before any work starts, if the deployment isn't configured for hosted-mode
+  Google connections, or is configured but has no valid stored connection yet — run the
+  `/auth/google/login` flow from [3.2](#32-hosted-deployment-docker) first.
+- `GET /stream/{job_id}` — a single Server-Sent Events route shared across all three tools,
+  streaming that run's progress and ending in one final `event: complete` line with the
+  outcome (the produced block's id(s), or an error). Reconnecting after a run has already
+  finished still replays its full history. None of the three tools has a cancel endpoint —
+  each is a single short LLM call chain, not worth interrupting mid-flight.
 
 ```
 curl -X POST "http://localhost:8000/generate/start?key=<CVDOCS_API_KEY>" \
@@ -215,7 +218,7 @@ curl -X POST "http://localhost:8000/generate/start?key=<CVDOCS_API_KEY>" \
      -d '{"criteria": "a small lighthouse keeper role"}'
 # -> {"job_id": "<id>"}
 
-curl -N "http://localhost:8000/generate/stream/<id>?key=<CVDOCS_API_KEY>"
+curl -N "http://localhost:8000/stream/<id>?key=<CVDOCS_API_KEY>"
 ```
 
 ## Configuration

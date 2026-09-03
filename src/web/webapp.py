@@ -5,6 +5,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse,
 from pydantic import BaseModel, ConfigDict, Field
 import uvicorn
 
+from tools import dissect as dissect_module
 from tools import generate as generate_module
 from tools import mutate as mutate_module
 from web import web_jobs
@@ -86,6 +87,10 @@ class MutateStartRequest(BaseModel):
     in_place: bool = False
 
 
+class DissectStartRequest(BaseModel):
+    doc: str
+
+
 @app.post("/generate/start")
 def generate_start(payload: GenerateStartRequest, key: str):
     settings = load_settings()
@@ -148,21 +153,44 @@ def mutate_start(payload: MutateStartRequest, key: str):
     return {"job_id": job.id}
 
 
-@app.get("/generate/stream/{job_id}")
-async def generate_stream(job_id: str, key: str):
+@app.post("/dissect/start")
+def dissect_start(payload: DissectStartRequest, key: str):
     settings = load_settings()
     if not _authorized(settings, key):
         return PlainTextResponse("Unauthorized", status_code=401)
 
-    job = web_jobs.get_job(job_id)
-    if job is None:
-        return PlainTextResponse("Unknown job id", status_code=404)
+    if not payload.doc.strip():
+        return PlainTextResponse("doc must not be empty.", status_code=400)
 
-    return StreamingResponse(web_jobs.sse_events(job), media_type="text/event-stream")
+    provider = get_auth_provider(settings)
+    if not isinstance(provider, WebAuthProvider):
+        return PlainTextResponse(
+            "This deployment is not configured for hosted-mode connections.", status_code=400
+        )
+    try:
+        provider.get_credentials()
+    except AuthError as exc:
+        return PlainTextResponse(str(exc), status_code=400)
+
+    def work(on_progress):
+        result = dissect_module.run_dissect(payload.doc, settings=settings, on_progress=on_progress)
+        return {
+            "saved": [{"block_id": stem, "name": block.name} for block, stem in result.saved],
+            "skipped_duplicates": [
+                {"name": name, "duplicate_of": dup} for name, dup in result.skipped_duplicates
+            ],
+            "variants": [
+                {"block_id": stem, "name": block.name, "label": label}
+                for block, stem, label in result.variants
+            ],
+        }
+
+    job = web_jobs.start_job(work)
+    return {"job_id": job.id}
 
 
-@app.get("/mutate/stream/{job_id}")
-async def mutate_stream(job_id: str, key: str):
+@app.get("/stream/{job_id}")
+async def stream(job_id: str, key: str):
     settings = load_settings()
     if not _authorized(settings, key):
         return PlainTextResponse("Unauthorized", status_code=401)

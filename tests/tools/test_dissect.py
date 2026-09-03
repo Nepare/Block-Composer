@@ -16,7 +16,7 @@ def _load_fixture():
 
 def test_run_dissect_extracts_both_blocks_with_zero_llm_calls(settings, fake_router, monkeypatch):
     document = _load_fixture()
-    monkeypatch.setattr(docs_api, "get_document", lambda doc_id: document)
+    monkeypatch.setattr(docs_api, "get_document", lambda doc_id, settings=None: document)
 
     client = FakeLLMClient()  # no replies queued -- must not be called at all
     fake_router(dissect_module, client)
@@ -40,7 +40,7 @@ def test_run_dissect_extracts_both_blocks_with_zero_llm_calls(settings, fake_rou
 
 def test_run_dissect_second_pass_over_the_same_doc_is_all_duplicates(settings, fake_router, monkeypatch):
     document = _load_fixture()
-    monkeypatch.setattr(docs_api, "get_document", lambda doc_id: document)
+    monkeypatch.setattr(docs_api, "get_document", lambda doc_id, settings=None: document)
     fake_router(dissect_module, FakeLLMClient())
 
     dissect_module.run_dissect("doc1", settings=settings)
@@ -52,7 +52,7 @@ def test_run_dissect_second_pass_over_the_same_doc_is_all_duplicates(settings, f
 
 def test_run_dissect_fires_one_progress_event_per_row(settings, fake_router, monkeypatch):
     document = _load_fixture()
-    monkeypatch.setattr(docs_api, "get_document", lambda doc_id: document)
+    monkeypatch.setattr(docs_api, "get_document", lambda doc_id, settings=None: document)
     fake_router(dissect_module, FakeLLMClient())
 
     events: list[ProgressEvent] = []
@@ -70,7 +70,7 @@ def test_run_dissect_resolves_url_to_doc_id(settings, fake_router, monkeypatch):
     document = _load_fixture()
     captured = {}
 
-    def fake_get_document(doc_id):
+    def fake_get_document(doc_id, settings=None):
         captured["doc_id"] = doc_id
         return document
 

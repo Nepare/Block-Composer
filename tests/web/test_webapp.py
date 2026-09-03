@@ -1,15 +1,26 @@
 import json
 import time
+from pathlib import Path
 
 from fastapi.testclient import TestClient
+from google.oauth2.credentials import Credentials
 
+from tools import dissect as dissect_module
+from tools import docs_api
 from tools import generate as generate_module
 from tools import mutate as mutate_module
 from web import web_jobs
 from web import webapp
+from auth.web import WebAuthProvider
 from models.blocks import Block
 from fakes import FakeLLMClient
 from storage.filesystem import FilesystemBlockStorage
+
+DISSECT_FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "greentown_doc_response.json"
+
+
+def _load_dissect_fixture():
+    return json.loads(DISSECT_FIXTURE.read_text(encoding="utf-8"))
 
 
 def _client(settings, monkeypatch):
@@ -40,6 +51,29 @@ def _stream(client, url):
         payload = json.loads(block.split("data: ", 1)[1])
         parsed.append((kind, payload))
     return parsed
+
+
+class FakeCredentialsStorage:
+    def __init__(self, creds=None):
+        self._creds = creds
+
+    def save(self, creds):
+        self._creds = creds
+
+    def load(self):
+        return self._creds
+
+
+def _connected_provider(settings):
+    creds = Credentials(
+        token="valid-token",
+        refresh_token="r",
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id="x",
+        client_secret="y",
+        scopes=settings.auth.google.scopes,
+    )
+    return WebAuthProvider(settings, FakeCredentialsStorage(creds))
 
 
 def test_generate_start_runs_in_background_and_saves(settings, monkeypatch, fake_router):
@@ -100,6 +134,103 @@ def test_mutate_start_runs_in_background_and_saves(settings, monkeypatch, fake_r
     assert job.outcome == {"block_id": "police_station_mut_renovated"}
 
 
+def test_dissect_start_runs_in_background_and_saves(settings, monkeypatch, fake_router):
+    document = _load_dissect_fixture()
+    monkeypatch.setattr(docs_api, "get_document", lambda doc_id, settings=None: document)
+    client = _client(settings, monkeypatch)
+    monkeypatch.setattr(webapp, "get_auth_provider", lambda s: _connected_provider(s))
+    fake_router(dissect_module, FakeLLMClient())  # naming client must not be called -- no conflicts
+
+    response = client.post(
+        "/dissect/start", params={"key": "test-key"}, json={"doc": "https://docs.google.com/document/d/FAKEID/edit"}
+    )
+
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+    job = _wait_for_job(job_id)
+    assert job.status == "done"
+    assert job.outcome == {
+        "saved": [
+            {"block_id": "police_station", "name": "Police Station"},
+            {"block_id": "lumber", "name": "Lumber"},
+        ],
+        "skipped_duplicates": [],
+        "variants": [],
+    }
+
+
+def test_dissect_start_second_pass_reports_duplicates(settings, monkeypatch, fake_router):
+    document = _load_dissect_fixture()
+    monkeypatch.setattr(docs_api, "get_document", lambda doc_id, settings=None: document)
+    client = _client(settings, monkeypatch)
+    monkeypatch.setattr(webapp, "get_auth_provider", lambda s: _connected_provider(s))
+    fake_router(dissect_module, FakeLLMClient())
+
+    first = client.post("/dissect/start", params={"key": "test-key"}, json={"doc": "doc1"})
+    _wait_for_job(first.json()["job_id"])
+
+    second = client.post("/dissect/start", params={"key": "test-key"}, json={"doc": "doc1"})
+    job = _wait_for_job(second.json()["job_id"])
+
+    assert job.status == "done"
+    assert job.outcome["saved"] == []
+    assert len(job.outcome["skipped_duplicates"]) == 2
+
+
+def test_dissect_stream_delivers_progress_then_done_outcome(settings, monkeypatch, fake_router):
+    document = _load_dissect_fixture()
+    monkeypatch.setattr(docs_api, "get_document", lambda doc_id, settings=None: document)
+    client = _client(settings, monkeypatch)
+    monkeypatch.setattr(webapp, "get_auth_provider", lambda s: _connected_provider(s))
+    fake_router(dissect_module, FakeLLMClient())
+
+    start = client.post("/dissect/start", params={"key": "test-key"}, json={"doc": "doc1"})
+    job_id = start.json()["job_id"]
+
+    parsed = _stream(client, f"/stream/{job_id}?key=test-key")
+
+    kinds = [payload["kind"] for kind, payload in parsed if kind == "data"]
+    assert kinds.count("dissect_row") == 2
+    assert parsed[-1][0] == "complete"
+    assert parsed[-1][1]["status"] == "done"
+    assert len(parsed[-1][1]["saved"]) == 2
+
+
+def test_dissect_start_rejects_empty_doc(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+    jobs_before = len(web_jobs._jobs)
+
+    response = client.post("/dissect/start", params={"key": "test-key"}, json={"doc": "   "})
+
+    assert response.status_code == 400
+    assert len(web_jobs._jobs) == jobs_before
+
+
+def test_dissect_start_rejects_when_not_configured_for_hosted_mode(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+    jobs_before = len(web_jobs._jobs)
+    monkeypatch.setattr(webapp, "get_auth_provider", lambda s: object())
+
+    response = client.post("/dissect/start", params={"key": "test-key"}, json={"doc": "doc1"})
+
+    assert response.status_code == 400
+    assert "not configured" in response.text
+    assert len(web_jobs._jobs) == jobs_before
+
+
+def test_dissect_start_rejects_when_not_connected(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+    jobs_before = len(web_jobs._jobs)
+    monkeypatch.setattr(
+        webapp, "get_auth_provider", lambda s: WebAuthProvider(s, FakeCredentialsStorage(None))
+    )
+
+    response = client.post("/dissect/start", params={"key": "test-key"}, json={"doc": "doc1"})
+
+    assert response.status_code == 400
+    assert len(web_jobs._jobs) == jobs_before
+
+
 def test_generate_start_rejects_empty_criteria(settings, monkeypatch):
     client = _client(settings, monkeypatch)
 
@@ -154,7 +285,7 @@ def test_generate_stream_delivers_progress_then_done_outcome(settings, monkeypat
     start = client.post("/generate/start", params={"key": "test-key"}, json={"criteria": "a sheriff outpost"})
     job_id = start.json()["job_id"]
 
-    parsed = _stream(client, f"/generate/stream/{job_id}?key=test-key")
+    parsed = _stream(client, f"/stream/{job_id}?key=test-key")
 
     kinds = [payload["kind"] for kind, payload in parsed if kind == "data"]
     assert "generate_start" in kinds
@@ -186,7 +317,7 @@ def test_mutate_stream_delivers_progress_then_done_outcome(settings, monkeypatch
     )
     job_id = start.json()["job_id"]
 
-    parsed = _stream(client, f"/mutate/stream/{job_id}?key=test-key")
+    parsed = _stream(client, f"/stream/{job_id}?key=test-key")
 
     kinds = [payload["kind"] for kind, payload in parsed if kind == "data"]
     assert "mutate_start" in kinds
@@ -201,7 +332,7 @@ def test_generate_stream_reports_error_outcome_on_exhausted_retry(settings, monk
     start = client.post("/generate/start", params={"key": "test-key"}, json={"criteria": "a sheriff outpost"})
     job_id = start.json()["job_id"]
 
-    parsed = _stream(client, f"/generate/stream/{job_id}?key=test-key")
+    parsed = _stream(client, f"/stream/{job_id}?key=test-key")
 
     kind, payload = parsed[-1]
     assert kind == "complete"
@@ -218,7 +349,7 @@ def test_stream_connect_after_job_finished_still_replays_full_history(settings, 
     job_id = start.json()["job_id"]
     _wait_for_job(job_id)  # job already finished before we ever connect to the stream
 
-    parsed = _stream(client, f"/generate/stream/{job_id}?key=test-key")
+    parsed = _stream(client, f"/stream/{job_id}?key=test-key")
 
     kinds = [payload["kind"] for kind, payload in parsed if kind == "data"]
     assert "generate_start" in kinds
@@ -230,7 +361,7 @@ def test_stream_connect_after_job_finished_still_replays_full_history(settings, 
 def test_generate_stream_rejects_unknown_job_id(settings, monkeypatch):
     client = _client(settings, monkeypatch)
 
-    response = client.get("/generate/stream/does-not-exist", params={"key": "test-key"})
+    response = client.get("/stream/does-not-exist", params={"key": "test-key"})
 
     assert response.status_code == 404
 
@@ -238,7 +369,7 @@ def test_generate_stream_rejects_unknown_job_id(settings, monkeypatch):
 def test_mutate_stream_rejects_unknown_job_id(settings, monkeypatch):
     client = _client(settings, monkeypatch)
 
-    response = client.get("/mutate/stream/does-not-exist", params={"key": "test-key"})
+    response = client.get("/stream/does-not-exist", params={"key": "test-key"})
 
     assert response.status_code == 404
 
@@ -298,7 +429,7 @@ def test_generate_stream_rejects_missing_key(settings, monkeypatch, fake_router)
     start = client.post("/generate/start", params={"key": "test-key"}, json={"criteria": "a sheriff outpost"})
     job_id = start.json()["job_id"]
 
-    response = client.get(f"/generate/stream/{job_id}")
+    response = client.get(f"/stream/{job_id}")
 
     assert response.status_code == 422
     assert not response.headers["content-type"].startswith("text/event-stream")
@@ -311,7 +442,7 @@ def test_generate_stream_rejects_wrong_key(settings, monkeypatch, fake_router):
     start = client.post("/generate/start", params={"key": "test-key"}, json={"criteria": "a sheriff outpost"})
     job_id = start.json()["job_id"]
 
-    response = client.get(f"/generate/stream/{job_id}", params={"key": "wrong-key"})
+    response = client.get(f"/stream/{job_id}", params={"key": "wrong-key"})
 
     assert response.status_code == 401
     assert not response.headers["content-type"].startswith("text/event-stream")
@@ -337,7 +468,7 @@ def test_mutate_stream_rejects_missing_key(settings, monkeypatch, fake_router):
     )
     job_id = start.json()["job_id"]
 
-    response = client.get(f"/mutate/stream/{job_id}")
+    response = client.get(f"/stream/{job_id}")
 
     assert response.status_code == 422
     assert not response.headers["content-type"].startswith("text/event-stream")
@@ -363,7 +494,7 @@ def test_mutate_stream_rejects_wrong_key(settings, monkeypatch, fake_router):
     )
     job_id = start.json()["job_id"]
 
-    response = client.get(f"/mutate/stream/{job_id}", params={"key": "wrong-key"})
+    response = client.get(f"/stream/{job_id}", params={"key": "wrong-key"})
 
     assert response.status_code == 401
     assert not response.headers["content-type"].startswith("text/event-stream")
@@ -375,3 +506,51 @@ def test_auth_google_login_rejects_missing_key(settings, monkeypatch):
     response = client.get("/auth/google/login", follow_redirects=False)
 
     assert response.status_code == 422
+
+
+def test_stream_route_behaves_identically_across_all_three_tools(settings, monkeypatch, fake_router):
+    client = _client(settings, monkeypatch)
+
+    fake_router(generate_module, FakeLLMClient(replies=["## Sheriff Outpost\n\nA frontier outpost.\n\n**Role:** nobody\n"]))
+    gen_start = client.post("/generate/start", params={"key": "test-key"}, json={"criteria": "a sheriff outpost"})
+    gen_job_id = gen_start.json()["job_id"]
+    _wait_for_job(gen_job_id)
+
+    FilesystemBlockStorage(settings.blocks_path).save(
+        Block(id="", body="## Watchtower\n\nRegular tower.\n\n**Rooms:**\n- Deck\n"),
+        filename_stem="watchtower",
+    )
+    fake_router(
+        mutate_module,
+        FakeLLMClient(
+            replies=[
+                "===BODY===\n## Watchtower\n\nRenovated tower.\n\n**Rooms:**\n- Deck\n"
+                "- Armory\n===LABEL===\nrenovated\n"
+            ]
+        ),
+    )
+    mut_start = client.post(
+        "/mutate/start",
+        params={"key": "test-key"},
+        json={"block_id": "watchtower", "criteria": "add an armory"},
+    )
+    mut_job_id = mut_start.json()["job_id"]
+    _wait_for_job(mut_job_id)
+
+    document = _load_dissect_fixture()
+    monkeypatch.setattr(docs_api, "get_document", lambda doc_id, settings=None: document)
+    monkeypatch.setattr(webapp, "get_auth_provider", lambda s: _connected_provider(s))
+    fake_router(dissect_module, FakeLLMClient())
+    dis_start = client.post("/dissect/start", params={"key": "test-key"}, json={"doc": "doc1"})
+    dis_job_id = dis_start.json()["job_id"]
+    _wait_for_job(dis_job_id)
+
+    for job_id in (gen_job_id, mut_job_id, dis_job_id):
+        parsed = _stream(client, f"/stream/{job_id}?key=test-key")
+        data_events = [payload for kind, payload in parsed if kind == "data"]
+        assert len(data_events) >= 1
+        assert parsed[-1][0] == "complete"
+        assert parsed[-1][1]["status"] == "done"
+
+    response = client.get("/stream/does-not-exist", params={"key": "test-key"})
+    assert response.status_code == 404

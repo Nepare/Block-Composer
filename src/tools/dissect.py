@@ -32,7 +32,7 @@ def run_dissect(
     """`on_progress`, if given, fires once per extracted row; optional, no-op by default."""
     progress = on_progress or (lambda _event: None)
     doc_id = docs_api.resolve_doc_id(doc_id_or_url)
-    document = docs_api.get_document(doc_id)
+    document = docs_api.get_document(doc_id, settings=settings)
 
     schema = templates_module.load_block_schema(templates_path or settings.templates_file)
     blocks_table = find_blocks_table(document, schema.section_marker, schema.table_columns)
