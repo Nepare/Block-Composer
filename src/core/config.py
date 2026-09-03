@@ -73,6 +73,7 @@ class PromptConstraintsConfig(BaseModel):
     naming: str = "input_prompts/constraints/NAMING_CONSTRAINTS.md"
     mutate: str = "input_prompts/constraints/MUTATE_CONSTRAINTS.md"
     compose: str = "input_prompts/constraints/COMPOSE_CONSTRAINTS.md"
+    keywords: str = "input_prompts/constraints/KEYWORDS_CONSTRAINTS.md"
 
 
 class ComposeConfig(BaseModel):

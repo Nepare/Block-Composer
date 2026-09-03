@@ -34,6 +34,7 @@ path:
     naming: input_prompts/constraints/NAMING_CONSTRAINTS.md
     mutate: input_prompts/constraints/MUTATE_CONSTRAINTS.md
     compose: input_prompts/constraints/COMPOSE_CONSTRAINTS.md
+    keywords: input_prompts/constraints/KEYWORDS_CONSTRAINTS.md
 
 behavior:
   compose:

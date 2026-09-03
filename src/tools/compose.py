@@ -44,13 +44,13 @@ def _select_candidate_blocks(
     keywords_client, keywords_model = get_client_and_model(
         settings.llm.models.keywords, settings, on_progress=progress
     )
-    compose_constraints = constraints_module.load(settings, "compose")
+    keywords_constraints = constraints_module.load(settings, "keywords")
     progress(ProgressEvent(kind="keyword_extraction", message="Extracting search keywords from request…"))
     signals = extract_retrieval_signals(
         request,
         keywords_client,
         keywords_model,
-        compose_constraints,
+        keywords_constraints,
         min_per_category=settings.behavior.compose.keywords_per_category_min,
         max_per_category=settings.behavior.compose.keywords_per_category_max,
     )

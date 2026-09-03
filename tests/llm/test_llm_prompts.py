@@ -1,4 +1,4 @@
-from llm.prompts import compose_prompt, generate_prompt, mutate_prompt, result_name_prompt
+from llm.prompts import compose_prompt, generate_prompt, keyword_extraction_prompt, mutate_prompt, result_name_prompt
 
 
 def test_generate_prompt_omits_constraints_section_when_empty():
@@ -26,3 +26,8 @@ def test_compose_prompt_appends_constraints_to_system_message():
 def test_result_name_prompt_appends_constraints_to_system_message():
     messages = result_name_prompt("some content", constraints="No superlatives.")
     assert "No superlatives." in messages[0]["content"]
+
+
+def test_keyword_extraction_prompt_appends_constraints_to_system_message():
+    messages = keyword_extraction_prompt("a request", constraints="Never invent a keyword.")
+    assert "Never invent a keyword." in messages[0]["content"]

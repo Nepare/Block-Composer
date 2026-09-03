@@ -29,8 +29,8 @@ def test_load_rejects_an_unknown_task():
         constraints.load(Settings(), "not_a_real_task")
 
 
-def test_load_covers_all_four_tasks(tmp_path):
-    for task in ("generate", "naming", "mutate", "compose"):
+def test_load_covers_all_five_tasks(tmp_path):
+    for task in ("generate", "naming", "mutate", "compose", "keywords"):
         (tmp_path / f"{task}.md").write_text(f"{task} rule", encoding="utf-8")
     settings = _settings_with(
         tmp_path,
@@ -38,7 +38,8 @@ def test_load_covers_all_four_tasks(tmp_path):
         naming="naming.md",
         mutate="mutate.md",
         compose="compose.md",
+        keywords="keywords.md",
     )
 
-    for task in ("generate", "naming", "mutate", "compose"):
+    for task in ("generate", "naming", "mutate", "compose", "keywords"):
         assert constraints.load(settings, task) == f"{task} rule"

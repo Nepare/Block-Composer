@@ -231,14 +231,32 @@ def test_planning_call_includes_constraints_file_in_the_system_prompt(settings, 
     # the target-count-detection call loads the same compose_constraints and reuses them
     detection_system_message = client.calls[0]["messages"][0]["content"]
     assert "Prefer mutate over generate." in detection_system_message
-    # the keyword-extraction call shares the compose tier's constraints file too
-    keyword_system_message = client.calls[1]["messages"][0]["content"]
-    assert "Prefer mutate over generate." in keyword_system_message
     planning_system_message = client.calls[2]["messages"][0]["content"]
     assert "Prefer mutate over generate." in planning_system_message
     # the result-naming call shares the compose tier's constraints file too
     naming_system_message = client.calls[3]["messages"][0]["content"]
     assert "Prefer mutate over generate." in naming_system_message
+
+
+def test_keyword_extraction_call_includes_the_keywords_tier_constraints_file(settings, fake_router, tmp_path):
+    _seed_library(settings)
+    compose_constraints_file = tmp_path / "COMPOSE_CONSTRAINTS.md"
+    compose_constraints_file.write_text("Prefer mutate over generate.", encoding="utf-8")
+    settings.path.constraints.compose = str(compose_constraints_file)
+    keywords_constraints_file = tmp_path / "KEYWORDS_CONSTRAINTS.md"
+    keywords_constraints_file.write_text("Never invent a keyword the request doesn't imply.", encoding="utf-8")
+    settings.path.constraints.keywords = str(keywords_constraints_file)
+
+    plan = json.dumps({"steps": [{"order": 1, "action": "use", "block_id": "school", "criteria": None}]})
+    unparseable_keywords_reply = "I cannot help with that."
+    client = FakeLLMClient(replies=["NONE", unparseable_keywords_reply, plan, "school_result"])
+    fake_router(compose_module, client)
+
+    compose_module.run_compose("need a school", settings=settings)
+
+    keyword_system_message = client.calls[1]["messages"][0]["content"]
+    assert "Never invent a keyword the request doesn't imply." in keyword_system_message
+    assert "Prefer mutate over generate." not in keyword_system_message
 
 
 def test_on_progress_fires_after_plan_and_around_each_mutate_and_generate(settings, fake_router):
