@@ -362,6 +362,8 @@ def test_small_library_still_extracts_keywords_and_narrows(settings, fake_router
 
 
 def test_keyword_extraction_narrows_the_catalog(settings, fake_router):
+    settings.llm.models.naming = "fakeprov:naming-model"
+    settings.llm.models.keywords = "fakeprov:keywords-model"
     _seed_large_library(settings, count=5)
     keywords_reply = "ROLE: \nENVIRONMENT: Jira\nRESPONSIBILITIES: \nDOMAIN: \n"
     plan = json.dumps({"steps": [{"order": 1, "action": "use", "block_id": "block_0", "criteria": None}]})
@@ -379,6 +381,36 @@ def test_keyword_extraction_narrows_the_catalog(settings, fake_router):
     # the planning call's catalog must carry each block's full body, not a truncated preview
     planning_user_message = client.calls[2]["messages"][1]["content"]
     assert "**Environment:** Jira" in planning_user_message
+    # target-count detection (call 0) still dispatches against the naming model...
+    assert client.calls[0]["model"] == "naming-model"
+    # ...while keyword extraction (call 1) dispatches against the distinct keywords model
+    assert client.calls[1]["model"] == "keywords-model"
+
+
+def test_naming_collision_and_target_count_stay_on_the_naming_model(settings, fake_router):
+    settings.llm.models.naming = "fakeprov:naming-model"
+    settings.llm.models.keywords = "fakeprov:keywords-model"
+    _seed_library(settings)
+    unparseable_keywords_reply = "I cannot help with that."
+    plan = json.dumps({"steps": [{"order": 1, "action": "use", "block_id": "school", "criteria": None}]})
+    client = FakeLLMClient(replies=["NONE", unparseable_keywords_reply, plan, "result_name"])
+    fake_router(compose_module, client)
+
+    compose_module.run_compose("need a school", settings=settings)
+
+    # target-count extraction (call 0) is unaffected by the distinct keywords setting
+    assert client.calls[0]["model"] == "naming-model"
+
+    # both runs' content-namer picks the same name; the second run's content differs, so
+    # naming.decide() must ask for a distinguishing variant label as a third call
+    variant_client = FakeLLMClient(replies=["overview", "overview", "variant"])
+    fake_router(compose_module, variant_client)
+
+    compose_module.run_compose("", settings=settings, use_ids=["school"])
+    compose_module.run_compose("", settings=settings, use_ids=["police_station"])
+
+    # the naming-collision decision (save_with_dedup's naming_model) also stays on naming
+    assert variant_client.calls[-1]["model"] == "naming-model"
 
 
 def test_narrowing_top_n_is_identical_regardless_of_a_number_in_the_request(settings, fake_router):

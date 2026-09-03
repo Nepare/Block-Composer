@@ -1,0 +1,18 @@
+# Test-owned fixture manifest. Not the real project's templates.yaml -- this file exists only
+# so tests exercise a fully-populated block schema without depending on the real, user-editable
+# templates.yaml at the repo root. Never read by application code.
+block_schema:
+  name: project_entry
+  container: table
+  section_marker: "Projects"
+  table_columns: 2
+  columns:
+    primary:
+      name_from: first_paragraph
+      body_from: remaining_paragraphs
+    details:
+      parse: heading_delimited_fields
+      known_fields:
+        - label: "Period"
+          name: time_period
+  tag_fields: [name]

@@ -15,7 +15,7 @@ llm:
     mutate: openrouter:minimax/minimax-m3:free
     compose: openrouter:minimax/minimax-m3:free
     naming: ollama:qwen3:1.7b
-    local_default: ollama:qwen3:4b
+    keywords: ollama:qwen3:4b
 
 path:
   blocks_dir: output/blocks

@@ -7,7 +7,7 @@ from typer.testing import CliRunner
 import cli
 from core.config import Settings
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+MOCK_TEMPLATES = Path(__file__).resolve().parent / "fixtures" / "templates.yaml"
 
 runner = CliRunner()
 
@@ -19,7 +19,7 @@ def cli_settings(tmp_path, monkeypatch):
     s = Settings()
     s.path.blocks_dir = str(tmp_path / "blocks")
     s.path.results_dir = str(tmp_path / "results")
-    s.path.templates_path = str(PROJECT_ROOT / "templates.yaml")
+    s.path.templates_path = str(MOCK_TEMPLATES)
     monkeypatch.setattr(cli, "_settings", lambda: s)
     return s
 

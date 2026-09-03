@@ -1,19 +1,42 @@
-from pathlib import Path
-
 import core.config as config
 from core.config import Settings, load_settings
 
-PROJECT_CONFIG = Path(__file__).resolve().parent.parent.parent / "config.yaml"
+
+def test_load_settings_maps_each_model_task_to_its_own_independent_setting(tmp_path):
+    p = tmp_path / "config.yaml"
+    p.write_text(
+        "llm:\n"
+        "  models:\n"
+        "    generate: providera:model-generate\n"
+        "    mutate: providerb:model-mutate\n"
+        "    compose: providerc:model-compose\n"
+        "    naming: providerd:model-naming\n"
+        "    keywords: providere:model-keywords\n",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(p)
+
+    assert settings.llm.models.generate == "providera:model-generate"
+    assert settings.llm.models.mutate == "providerb:model-mutate"
+    assert settings.llm.models.compose == "providerc:model-compose"
+    assert settings.llm.models.naming == "providerd:model-naming"
+    assert settings.llm.models.keywords == "providere:model-keywords"
 
 
-def test_real_config_yaml_sends_naming_local_and_everything_else_to_openrouter():
-    """naming is the cheapest, least quality-sensitive task -- it's the one deliberately
-    routed to a local Ollama model instead of the pinned OpenRouter default."""
-    settings = load_settings(PROJECT_CONFIG)
-    assert settings.llm.models.naming.startswith("ollama:")
-    assert settings.llm.models.generate.startswith("openrouter:")
-    assert settings.llm.models.mutate.startswith("openrouter:")
-    assert settings.llm.models.compose.startswith("openrouter:")
+def test_load_settings_allows_naming_and_keywords_to_share_the_same_model(tmp_path):
+    """An operator pointing naming and keywords at the same model is a valid configuration
+    choice, not an error -- nothing in this system requires them to differ."""
+    p = tmp_path / "config.yaml"
+    p.write_text(
+        "llm:\n  models:\n    naming: shared:one-model\n    keywords: shared:one-model\n",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(p)
+
+    assert settings.llm.models.naming == "shared:one-model"
+    assert settings.llm.models.keywords == "shared:one-model"
 
 
 def test_defaults_when_config_file_is_missing(tmp_path):
@@ -21,6 +44,7 @@ def test_defaults_when_config_file_is_missing(tmp_path):
     assert settings.path.blocks_dir == "output/blocks"
     assert settings.llm.models.generate == "openrouter:minimax/minimax-m3:free"
     assert settings.llm.models.naming == "openrouter:minimax/minimax-m3:free"
+    assert settings.llm.models.keywords == "openrouter:minimax/minimax-m3:free"
 
 
 def test_load_settings_reads_yaml_overrides(tmp_path):

@@ -2,7 +2,7 @@ import sys
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 import uvicorn
 
 from tools import generate as generate_module
@@ -71,8 +71,10 @@ def auth_google_callback(code: str | None = None, state: str | None = None, erro
 
 
 class GenerateStartRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     criteria: str
-    schema: str = "project_entry"
+    block_schema: str = Field(default="project_entry", alias="schema")
     style_from: list[str] = []
     model: str | None = None
 
@@ -103,7 +105,7 @@ def generate_start(payload: GenerateStartRequest, key: str):
         block, decision, stem = generate_module.run_generate(
             payload.criteria,
             settings=settings,
-            schema=payload.schema,
+            schema=payload.block_schema,
             style_from=style_blocks,
             model_spec=payload.model,
             on_progress=on_progress,

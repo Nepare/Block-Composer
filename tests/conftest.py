@@ -4,17 +4,17 @@ import pytest
 
 from core.config import Settings
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+MOCK_TEMPLATES = Path(__file__).resolve().parent / "fixtures" / "templates.yaml"
 
 
 @pytest.fixture
 def settings(tmp_path):
-    """A Settings instance pointed entirely at a scratch tmp_path — never touches the
-    real output/blocks or output/results directories."""
+    """A Settings instance pointed entirely at a scratch tmp_path (plus the test-owned mock
+    templates.yaml) — never touches the real config.yaml, templates.yaml, or output/ dirs."""
     s = Settings()
     s.path.blocks_dir = str(tmp_path / "blocks")
     s.path.results_dir = str(tmp_path / "results")
-    s.path.templates_path = str(PROJECT_ROOT / "templates.yaml")
+    s.path.templates_path = str(MOCK_TEMPLATES)
     return s
 
 

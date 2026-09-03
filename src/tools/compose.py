@@ -41,13 +41,15 @@ def _select_candidate_blocks(
     """Narrows the block library to the blocks matching keywords extracted from the request."""
     blocks = [b for b in store.all() if b.id not in exclude_ids]
 
-    naming_client, naming_model = get_client_and_model(settings.llm.models.naming, settings, on_progress=progress)
+    keywords_client, keywords_model = get_client_and_model(
+        settings.llm.models.keywords, settings, on_progress=progress
+    )
     compose_constraints = constraints_module.load(settings, "compose")
     progress(ProgressEvent(kind="keyword_extraction", message="Extracting search keywords from request…"))
     signals = extract_retrieval_signals(
         request,
-        naming_client,
-        naming_model,
+        keywords_client,
+        keywords_model,
         compose_constraints,
         min_per_category=settings.behavior.compose.keywords_per_category_min,
         max_per_category=settings.behavior.compose.keywords_per_category_max,

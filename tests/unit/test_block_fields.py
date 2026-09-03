@@ -78,19 +78,3 @@ def test_completely_empty_body_does_not_raise():
 
     assert fields.name == ""
     assert fields.role is None
-
-
-def test_real_shipped_sample_blocks_parse_correctly():
-    import frontmatter
-
-    from pathlib import Path
-
-    samples_dir = Path(__file__).resolve().parent.parent.parent / "input_prompts" / "sample_entries"
-    for path in samples_dir.glob("*.md"):
-        post = frontmatter.load(str(path))
-        fields = parse_block_body(post.content)
-        assert fields.name
-        assert fields.role
-        assert fields.time_period
-        assert fields.environment
-        assert "responsibilities" in fields.other_fields

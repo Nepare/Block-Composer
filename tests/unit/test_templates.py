@@ -5,11 +5,11 @@ import pytest
 from core.errors import TemplateError
 from models.templates import BlockSchema, KnownField, load_block_schema
 
-PROJECT_TEMPLATES = Path(__file__).resolve().parent.parent.parent / "templates.yaml"
+MOCK_MANIFEST = Path(__file__).resolve().parent.parent / "fixtures" / "templates.yaml"
 
 
-def test_load_real_project_templates_yaml():
-    schema = load_block_schema(PROJECT_TEMPLATES)
+def test_load_block_schema_from_a_fully_populated_manifest():
+    schema = load_block_schema(MOCK_MANIFEST)
     assert schema.name == "project_entry"
     assert schema.section_marker == "Projects"
     assert schema.table_columns == 2

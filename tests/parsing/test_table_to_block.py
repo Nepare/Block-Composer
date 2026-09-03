@@ -3,7 +3,7 @@ from pathlib import Path
 from parsing.table_to_block import extract_block
 from models.templates import load_block_schema
 
-TEMPLATES_PATH = Path(__file__).resolve().parent.parent.parent / "templates.yaml"
+TEMPLATES_PATH = Path(__file__).resolve().parent.parent / "fixtures" / "templates.yaml"
 
 
 def _para(text, bold=False, bullet=False, style="HEADING_2"):

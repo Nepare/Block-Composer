@@ -46,7 +46,7 @@ class ModelsConfig(BaseModel):
     mutate: str = "openrouter:minimax/minimax-m3:free"
     compose: str = "openrouter:minimax/minimax-m3:free"
     naming: str = "openrouter:minimax/minimax-m3:free"
-    local_default: str = "ollama:qwen3-coder-next"
+    keywords: str = "openrouter:minimax/minimax-m3:free"
 
 
 class GoogleConfig(BaseModel):
@@ -82,7 +82,7 @@ class ComposeConfig(BaseModel):
     keyword_search_top_n: int = 12
     keyword_search_unmatched_reserve: int = 2  # fixed, not proportional to top_n
     keywords_per_category_min: int = 0
-    keywords_per_category_max: int = 4  # hard-truncates; min isn't enforced
+    keywords_per_category_max: int = 10  # hard-truncates; min isn't enforced
 
 
 class StorageConfig(BaseModel):
