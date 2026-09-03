@@ -231,6 +231,28 @@ HTTP, gated by the same `?key=<CVDOCS_API_KEY>` credential as `/auth/google/logi
   `"status": "cancelled"` on the stream's terminal event — generate/mutate/dissect stay
   cancel-less, each being a single short LLM call chain not worth interrupting mid-flight.
 
+The block library and results history are also reachable over HTTP, gated by the same `key`.
+Unlike the routes above, all seven respond synchronously with the requested data directly — none
+of them return a `job_id` or involve `/stream`:
+
+- `GET /blocks` — every block in the library, each as a summary (`id`, `name`, `tags`, `schema`,
+  `source`, `created_at`, no `body`); optional `query` (substring over name/body) and repeatable
+  `tag` params, same filtering as `cvdocs blocks list`.
+- `GET /blocks/{id}` — one block's full content, matching `cvdocs blocks show`; `404` if the id
+  doesn't exist.
+- `PUT /blocks/{id}` — replaces an existing block's `body` in place; `tags`/`schema` are optional
+  and left unchanged when omitted. Never creates a new block — `404` if the id doesn't exist,
+  `400` if `body` is blank. The block's id, origin, and generation history are never altered by an
+  edit.
+- `DELETE /blocks/{id}` — permanently removes a block; `404` if the id doesn't exist. No cascade —
+  any saved result that referenced this block keeps its own copy of what it used.
+- `GET /results` — every saved compose result, each as a summary (`id`, `name`, `request`,
+  `created_at`, no `content`); optional `query` (substring over name/content), same as `cvdocs
+  results list`.
+- `GET /results/{id}` — one result's full content plus `use_ids`, `generate_criteria`, and
+  `slots`, matching `cvdocs results show`; `404` if the id doesn't exist.
+- `DELETE /results/{id}` — permanently removes a saved result; `404` if the id doesn't exist.
+
 ```
 curl -X POST "http://localhost:8000/generate/start?key=<CVDOCS_API_KEY>" \
      -H "Content-Type: application/json" \

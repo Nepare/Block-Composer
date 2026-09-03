@@ -1,4 +1,6 @@
 import sys
+from dataclasses import replace
+from datetime import datetime
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, StreamingResponse
@@ -13,9 +15,11 @@ from web import web_jobs
 from auth.router import get_auth_provider
 from auth.web import WebAuthProvider
 from core.config import Settings, load_settings
-from core.errors import AuthError, CvdocsError
+from core.errors import AuthError, BlockNotFoundError, CvdocsError
+from models.blocks import Block
+from storage.base import Result
 import os
-from storage.router import get_block_storage
+from storage.router import get_block_storage, get_result_storage
 from storage.sqlite import SqlitePendingSignInStore
 
 app = FastAPI()
@@ -100,6 +104,106 @@ class ComposeStartRequest(BaseModel):
     count: int | None = None
     model: str | None = None
     max_generate: int | None = None
+
+
+class BlockUpdateRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    body: str
+    tags: list[str] | None = None
+    block_schema: str | None = Field(default=None, alias="schema")
+
+
+class BlockSummary(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str
+    name: str
+    tags: list[str]
+    block_schema: str | None = Field(alias="schema")
+    source: str
+    created_at: datetime | None
+
+    @classmethod
+    def from_block(cls, block: Block) -> "BlockSummary":
+        return cls(
+            id=block.id,
+            name=block.name,
+            tags=block.tags,
+            schema=block.schema,
+            source=block.source,
+            created_at=block.created_at,
+        )
+
+
+class BlockDetail(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str
+    name: str
+    tags: list[str]
+    block_schema: str | None = Field(alias="schema")
+    source: str
+    created_at: datetime | None
+    body: str
+    created_by: str
+    generation_criteria: str | None
+    mutated_from: str | None
+
+    @classmethod
+    def from_block(cls, block: Block) -> "BlockDetail":
+        return cls(
+            id=block.id,
+            name=block.name,
+            tags=block.tags,
+            schema=block.schema,
+            source=block.source,
+            created_at=block.created_at,
+            body=block.body,
+            created_by=block.created_by,
+            generation_criteria=block.generation_criteria,
+            mutated_from=block.mutated_from,
+        )
+
+
+class ResultSummary(BaseModel):
+    id: str
+    name: str
+    request: str
+    created_at: datetime | None
+
+    @classmethod
+    def from_result(cls, result: Result) -> "ResultSummary":
+        return cls(
+            id=result.id,
+            name=result.name,
+            request=result.request,
+            created_at=result.created_at,
+        )
+
+
+class ResultDetail(BaseModel):
+    id: str
+    name: str
+    request: str
+    created_at: datetime | None
+    content: str
+    use_ids: list[str]
+    generate_criteria: list[str]
+    slots: list[dict]
+
+    @classmethod
+    def from_result(cls, result: Result) -> "ResultDetail":
+        return cls(
+            id=result.id,
+            name=result.name,
+            request=result.request,
+            created_at=result.created_at,
+            content=result.content,
+            use_ids=result.use_ids,
+            generate_criteria=result.generate_criteria,
+            slots=result.slots,
+        )
 
 
 @app.post("/generate/start")
@@ -256,6 +360,109 @@ def compose_start(payload: ComposeStartRequest, key: str):
 
     job = web_jobs.start_job(work, cancellable=True)
     return {"job_id": job.id}
+
+
+@app.get("/blocks")
+def blocks_list(key: str, query: str | None = None, tag: list[str] = []):
+    settings = load_settings()
+    if not _authorized(settings, key):
+        return PlainTextResponse("Unauthorized", status_code=401)
+
+    store = get_block_storage(settings)
+    blocks = store.search(query=query, tags=tag or None)
+    return [BlockSummary.from_block(b) for b in blocks]
+
+
+@app.get("/blocks/{block_id}")
+def blocks_get(block_id: str, key: str):
+    settings = load_settings()
+    if not _authorized(settings, key):
+        return PlainTextResponse("Unauthorized", status_code=401)
+
+    store = get_block_storage(settings)
+    try:
+        block = store.load(block_id)
+    except BlockNotFoundError as exc:
+        return PlainTextResponse(str(exc), status_code=404)
+    return BlockDetail.from_block(block)
+
+
+@app.put("/blocks/{block_id}")
+def blocks_update(block_id: str, payload: BlockUpdateRequest, key: str):
+    settings = load_settings()
+    if not _authorized(settings, key):
+        return PlainTextResponse("Unauthorized", status_code=401)
+
+    store = get_block_storage(settings)
+    try:
+        existing = store.load(block_id)
+    except BlockNotFoundError as exc:
+        return PlainTextResponse(str(exc), status_code=404)
+
+    if not payload.body.strip():
+        return PlainTextResponse("body must not be empty.", status_code=400)
+
+    updated = replace(
+        existing,
+        body=payload.body,
+        tags=payload.tags if payload.tags is not None else existing.tags,
+        schema=payload.block_schema if payload.block_schema is not None else existing.schema,
+    )
+    store.save(updated, filename_stem=block_id)
+    return BlockDetail.from_block(updated)
+
+
+@app.delete("/blocks/{block_id}")
+def blocks_delete(block_id: str, key: str):
+    settings = load_settings()
+    if not _authorized(settings, key):
+        return PlainTextResponse("Unauthorized", status_code=401)
+
+    store = get_block_storage(settings)
+    try:
+        store.delete(block_id)
+    except BlockNotFoundError as exc:
+        return PlainTextResponse(str(exc), status_code=404)
+    return {"deleted": block_id}
+
+
+@app.get("/results")
+def results_list(key: str, query: str | None = None):
+    settings = load_settings()
+    if not _authorized(settings, key):
+        return PlainTextResponse("Unauthorized", status_code=401)
+
+    store = get_result_storage(settings)
+    results = store.search(query=query)
+    return [ResultSummary.from_result(r) for r in results]
+
+
+@app.get("/results/{result_id}")
+def results_get(result_id: str, key: str):
+    settings = load_settings()
+    if not _authorized(settings, key):
+        return PlainTextResponse("Unauthorized", status_code=401)
+
+    store = get_result_storage(settings)
+    try:
+        result = store.load(result_id)
+    except BlockNotFoundError as exc:
+        return PlainTextResponse(str(exc), status_code=404)
+    return ResultDetail.from_result(result)
+
+
+@app.delete("/results/{result_id}")
+def results_delete(result_id: str, key: str):
+    settings = load_settings()
+    if not _authorized(settings, key):
+        return PlainTextResponse("Unauthorized", status_code=401)
+
+    store = get_result_storage(settings)
+    try:
+        store.delete(result_id)
+    except BlockNotFoundError as exc:
+        return PlainTextResponse(str(exc), status_code=404)
+    return {"deleted": result_id}
 
 
 @app.get("/stream/{job_id}")
