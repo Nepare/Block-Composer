@@ -26,6 +26,11 @@ class FakeBlockStorage:
             raise BlockNotFoundError(f"No block {filename_stem!r}")
         return self._blocks[filename_stem]
 
+    def delete(self, filename_stem) -> None:
+        if filename_stem not in self._blocks:
+            raise BlockNotFoundError(f"No block {filename_stem!r}")
+        del self._blocks[filename_stem]
+
     def all(self) -> list:
         return list(self._blocks.values())
 
@@ -87,6 +92,11 @@ class FakeResultStorage:
         if filename_stem not in self._results:
             raise BlockNotFoundError(f"No result {filename_stem!r}")
         return self._results[filename_stem]
+
+    def delete(self, filename_stem) -> None:
+        if filename_stem not in self._results:
+            raise BlockNotFoundError(f"No result {filename_stem!r}")
+        del self._results[filename_stem]
 
     def all(self) -> list:
         return list(self._results.values())

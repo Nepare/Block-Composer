@@ -40,6 +40,12 @@ class FilesystemBlockStorage:
         post = frontmatter.load(str(path))
         return Block.from_post(post, default_id=path.stem)
 
+    def delete(self, filename_stem: str) -> None:
+        path = self.path_for(filename_stem)
+        if not path.exists():
+            raise BlockNotFoundError(f"No block at {path}")
+        path.unlink()
+
     def all(self) -> list[Block]:
         return [
             Block.from_post(frontmatter.load(str(p)), default_id=p.stem)
@@ -98,9 +104,8 @@ class FilesystemBlockStorage:
 
 
 class FilesystemResultStorage:
-    """Loads/saves/searches compose Result files as plain-text `.md` under
-    `output/results/` — only `content` persists; `request`/`use_ids`/`slots`/
-    `progress_log` are accepted by `save`/`save_with_dedup` but not stored here."""
+    """Loads/saves/searches compose Result files as Markdown + YAML frontmatter under
+    `output/results/` — `progress_log` is deliberately not persisted."""
 
     def __init__(self, root: Path | str):
         self.root = Path(root)
@@ -116,14 +121,21 @@ class FilesystemResultStorage:
         stem = filename_stem or result.id or naming.slugify(result.name)
         result.id = stem
         path = self.path_for(stem)
-        path.write_text(result.content, encoding="utf-8")
+        frontmatter.dump(result.to_post(), str(path))
         return stem
 
     def load(self, filename_stem: str) -> Result:
         path = self.path_for(filename_stem)
         if not path.exists():
             raise BlockNotFoundError(f"No result at {path}")
-        return Result(id=filename_stem, content=path.read_text(encoding="utf-8"), name=filename_stem)
+        post = frontmatter.load(str(path))
+        return Result.from_post(post, default_id=filename_stem)
+
+    def delete(self, filename_stem: str) -> None:
+        path = self.path_for(filename_stem)
+        if not path.exists():
+            raise BlockNotFoundError(f"No result at {path}")
+        path.unlink()
 
     def all(self) -> list[Result]:
         return [self.load(p.stem) for p in sorted(self.root.glob("*.md"))]

@@ -55,6 +55,33 @@ def test_path_for_is_always_none(db_path):
     assert store.path_for("lumber") is None
 
 
+def test_save_then_delete_block(db_path):
+    store = SqliteBlockStorage(db_path)
+    store.save(Block(id="", body="## Lumber\n\nA lumber yard.\n"), filename_stem="lumber")
+
+    store.delete("lumber")
+
+    assert store.exists("lumber") is False
+    with pytest.raises(BlockNotFoundError):
+        store.load("lumber")
+
+
+def test_delete_missing_block_raises(db_path):
+    store = SqliteBlockStorage(db_path)
+    with pytest.raises(BlockNotFoundError):
+        store.delete("nope")
+
+
+def test_delete_removes_the_row_from_the_blocks_table(db_path):
+    store = SqliteBlockStorage(db_path)
+    store.save(Block(id="", body="## Lumber\n\nA lumber yard.\n"), filename_stem="lumber")
+
+    store.delete("lumber")
+
+    count = store._conn.execute("SELECT COUNT(*) FROM blocks WHERE id = ?", ("lumber",)).fetchone()[0]
+    assert count == 0
+
+
 def test_siblings_matches_base_and_variant_names_only(db_path):
     store = SqliteBlockStorage(db_path)
     store.save(Block(id="", body="## Police Station\n\nA.\n"), filename_stem="police_station")
@@ -63,6 +90,17 @@ def test_siblings_matches_base_and_variant_names_only(db_path):
 
     siblings = store.siblings("police_station")
     assert {b.id for b in siblings} == {"police_station", "police_station_mut_jail"}
+
+
+def test_delete_base_block_does_not_cascade_to_variant_sibling(db_path):
+    store = SqliteBlockStorage(db_path)
+    store.save(Block(id="", body="## Police Station\n\nA.\n"), filename_stem="police_station")
+    store.save(Block(id="", body="## Police Station\n\nB.\n"), filename_stem="police_station_mut_jail")
+
+    store.delete("police_station")
+
+    assert store.exists("police_station_mut_jail") is True
+    assert store.load("police_station_mut_jail").body.strip().endswith("B.")
 
 
 def test_search_by_tag_and_query(db_path):
@@ -204,6 +242,26 @@ def test_result_save_with_dedup_variant_on_conflicting_content(db_path):
 def test_result_path_for_is_always_none(db_path):
     store = SqliteResultStorage(db_path)
     assert store.path_for("school_overview") is None
+
+
+def test_save_then_delete_result(db_path):
+    store = SqliteResultStorage(db_path)
+    store.save(
+        Result(content="## School\n\nTeaches children.\n", name="School Overview"),
+        filename_stem="school_overview",
+    )
+
+    store.delete("school_overview")
+
+    assert store.exists("school_overview") is False
+    with pytest.raises(BlockNotFoundError):
+        store.load("school_overview")
+
+
+def test_delete_missing_result_raises(db_path):
+    store = SqliteResultStorage(db_path)
+    with pytest.raises(BlockNotFoundError):
+        store.delete("nope")
 
 
 def test_pending_sign_in_start_then_verify_and_consume(db_path):

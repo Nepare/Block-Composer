@@ -15,14 +15,16 @@ from auth.router import get_auth_provider
 from core.config import load_settings
 from core.errors import AuthError, CvdocsError
 from core.progress import RichConsoleSink
-from storage.router import get_block_storage
+from storage.router import get_block_storage, get_result_storage
 from core.text_input import resolve_text_input
 
 app = typer.Typer(add_completion=False, help="cvdocs — a configurable block library and composer.")
 auth_app = typer.Typer(help="Google OAuth login/status.")
 blocks_app = typer.Typer(help="Inspect the local block library.")
+results_app = typer.Typer(help="Inspect saved compose results.")
 app.add_typer(auth_app, name="auth")
 app.add_typer(blocks_app, name="blocks")
+app.add_typer(results_app, name="results")
 
 console = Console()
 
@@ -263,6 +265,60 @@ def blocks_show(block_id: str = typer.Argument(...)):
         _print_error(exc)
         raise typer.Exit(1)
     console.print(escape(block.body))
+
+
+@blocks_app.command("delete")
+def blocks_delete(block_id: str = typer.Argument(...)):
+    settings = _settings()
+    store = get_block_storage(settings)
+    try:
+        store.delete(block_id)
+    except CvdocsError as exc:
+        _print_error(exc)
+        raise typer.Exit(1)
+    console.print(f"[green]Deleted[/green] {escape(block_id)}")
+
+
+@results_app.command("list")
+def results_list(query: Optional[str] = typer.Option(None, "--query")):
+    settings = _settings()
+    store = get_result_storage(settings)
+    results = store.search(query=query)
+    table = Table(title="Results")
+    table.add_column("id")
+    table.add_column("name")
+    table.add_column("request")
+    for r in results:
+        table.add_row(escape(r.id), escape(r.name), escape(r.request))
+    console.print(table)
+
+
+@results_app.command("show")
+def results_show(result_id: str = typer.Argument(...)):
+    settings = _settings()
+    store = get_result_storage(settings)
+    try:
+        result = store.load(result_id)
+    except CvdocsError as exc:
+        _print_error(exc)
+        raise typer.Exit(1)
+    console.print(escape(result.content))
+    console.print(f"\n[bold]Request:[/bold] {escape(result.request or '(none)')}")
+    console.print(f"[bold]Use ids:[/bold] {escape(', '.join(result.use_ids) or '(none)')}")
+    console.print(f"[bold]Generate criteria:[/bold] {escape(', '.join(result.generate_criteria) or '(none)')}")
+    console.print(f"[bold]Slots:[/bold] {escape(str(result.slots)) if result.slots else '(none)'}")
+
+
+@results_app.command("delete")
+def results_delete(result_id: str = typer.Argument(...)):
+    settings = _settings()
+    store = get_result_storage(settings)
+    try:
+        store.delete(result_id)
+    except CvdocsError as exc:
+        _print_error(exc)
+        raise typer.Exit(1)
+    console.print(f"[green]Deleted[/green] {escape(result_id)}")
 
 
 if __name__ == "__main__":

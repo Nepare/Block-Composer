@@ -114,6 +114,21 @@ class SqliteBlockStorage:
             raise BlockNotFoundError(f"No block {filename_stem!r} in {self.path}")
         return self._row_to_block(row)
 
+    def delete(self, filename_stem: str) -> None:
+        self._conn.execute("BEGIN")
+        try:
+            cursor = self._conn.execute("DELETE FROM blocks WHERE id = ?", (filename_stem,))
+            if cursor.rowcount == 0:
+                self._conn.execute("ROLLBACK")
+                raise BlockNotFoundError(f"No block {filename_stem!r} in {self.path}")
+        except BlockNotFoundError:
+            raise
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
+        else:
+            self._conn.execute("COMMIT")
+
     def all(self) -> list[Block]:
         rows = self._conn.execute("SELECT * FROM blocks ORDER BY id").fetchall()
         return [self._row_to_block(r) for r in rows]
@@ -264,6 +279,21 @@ class SqliteResultStorage:
         if row is None:
             raise BlockNotFoundError(f"No result {filename_stem!r} in {self.path}")
         return self._row_to_result(row)
+
+    def delete(self, filename_stem: str) -> None:
+        self._conn.execute("BEGIN")
+        try:
+            cursor = self._conn.execute("DELETE FROM results WHERE id = ?", (filename_stem,))
+            if cursor.rowcount == 0:
+                self._conn.execute("ROLLBACK")
+                raise BlockNotFoundError(f"No result {filename_stem!r} in {self.path}")
+        except BlockNotFoundError:
+            raise
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
+        else:
+            self._conn.execute("COMMIT")
 
     def all(self) -> list[Result]:
         rows = self._conn.execute("SELECT * FROM results ORDER BY id").fetchall()

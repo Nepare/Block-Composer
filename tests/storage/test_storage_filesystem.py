@@ -1,3 +1,4 @@
+import frontmatter
 import pytest
 
 from models.blocks import Block
@@ -57,6 +58,23 @@ def test_load_missing_block_raises(tmp_path):
         store.load("nope")
 
 
+def test_save_then_delete_block_removes_it(tmp_path):
+    store = FilesystemBlockStorage(tmp_path)
+    store.save(Block(id="", body="## Lumber\n\nA lumber yard.\n"), filename_stem="lumber")
+
+    store.delete("lumber")
+
+    assert store.exists("lumber") is False
+    with pytest.raises(BlockNotFoundError):
+        store.load("lumber")
+
+
+def test_delete_missing_block_raises(tmp_path):
+    store = FilesystemBlockStorage(tmp_path)
+    with pytest.raises(BlockNotFoundError):
+        store.delete("nope")
+
+
 def test_path_for_returns_the_expected_md_path(tmp_path):
     store = FilesystemBlockStorage(tmp_path)
     assert store.path_for("lumber") == tmp_path / "lumber.md"
@@ -70,6 +88,18 @@ def test_siblings_matches_base_and_variant_names_only(tmp_path):
 
     siblings = store.siblings("police_station")
     assert {b.id for b in siblings} == {"police_station", "police_station_mut_jail"}
+
+
+def test_delete_base_block_does_not_cascade_to_variant_sibling(tmp_path):
+    store = FilesystemBlockStorage(tmp_path)
+    store.save(Block(id="", body="## Police Station\n\nA.\n"), filename_stem="police_station")
+    store.save(Block(id="", body="## Police Station\n\nB.\n"), filename_stem="police_station_mut_jail")
+
+    store.delete("police_station")
+
+    assert store.exists("police_station") is False
+    assert store.exists("police_station_mut_jail") is True
+    assert "B." in store.load("police_station_mut_jail").body
 
 
 def test_search_by_tag_and_query(tmp_path):
@@ -139,17 +169,68 @@ def test_save_with_dedup_forwards_naming_constraints_to_the_llm(tmp_path):
     assert "Never use single letters." in system_message
 
 
-def test_result_save_writes_plain_text_with_no_frontmatter(tmp_path):
-    """The on-disk result format must stay exactly what it was before the storage
-    Protocol existed -- raw content, no metadata header -- so this refactor changes zero
-    on-disk bytes for filesystem-mode users."""
+def test_result_save_writes_frontmatter_and_content(tmp_path):
     store = FilesystemResultStorage(tmp_path)
-    result = Result(content="## School\n\nTeaches children.\n", name="School Overview")
+    result = Result(content="## School\n\nTeaches children.\n", name="School Overview", request="need a school")
 
     stem = store.save(result, filename_stem="school_overview")
 
     assert stem == "school_overview"
-    assert (tmp_path / "school_overview.md").read_text(encoding="utf-8") == "## School\n\nTeaches children.\n"
+    post = frontmatter.load(str(tmp_path / "school_overview.md"))
+    assert post.content == "## School\n\nTeaches children."
+    assert post.metadata["name"] == "School Overview"
+    assert post.metadata["request"] == "need a school"
+
+
+def test_result_save_and_load_roundtrip_preserves_compose_context(tmp_path):
+    store = FilesystemResultStorage(tmp_path)
+    result = Result(
+        content="## School\n\nTeaches children.\n",
+        name="School Overview",
+        request="need a school",
+        use_ids=["school"],
+        generate_criteria=["a barn"],
+        slots=[
+            {
+                "order": 1,
+                "action": "use",
+                "block_id": "school",
+                "criteria": None,
+                "resolved_id": "school",
+            }
+        ],
+    )
+    stem = store.save(result, filename_stem="school_overview")
+
+    loaded = store.load(stem)
+
+    assert loaded.request == "need a school"
+    assert loaded.use_ids == ["school"]
+    assert loaded.generate_criteria == ["a barn"]
+    assert loaded.slots == [
+        {
+            "order": 1,
+            "action": "use",
+            "block_id": "school",
+            "criteria": None,
+            "resolved_id": "school",
+        }
+    ]
+
+
+def test_hand_authored_result_gets_sane_defaults(tmp_path):
+    (tmp_path / "manual.md").write_text(
+        "## Hand Written\n\nJust a body, no frontmatter.\n", encoding="utf-8"
+    )
+    store = FilesystemResultStorage(tmp_path)
+
+    result = store.load("manual")
+
+    assert "Just a body" in result.content
+    assert result.request == ""
+    assert result.use_ids == []
+    assert result.generate_criteria == []
+    assert result.slots == []
 
 
 def test_result_save_with_dedup_reuses_an_identical_rerun(tmp_path):
@@ -187,3 +268,20 @@ def test_result_save_with_dedup_variant_on_conflicting_content(tmp_path):
     assert decision.action == "save_variant"
     assert stem == "school_overview_mut_variant"
     assert client.call_count == 1
+
+
+def test_save_then_delete_result_removes_it(tmp_path):
+    store = FilesystemResultStorage(tmp_path)
+    store.save(Result(content="## School\n\nTeaches children.\n", name="School Overview"), filename_stem="school_overview")
+
+    store.delete("school_overview")
+
+    assert store.exists("school_overview") is False
+    with pytest.raises(BlockNotFoundError):
+        store.load("school_overview")
+
+
+def test_delete_missing_result_raises(tmp_path):
+    store = FilesystemResultStorage(tmp_path)
+    with pytest.raises(BlockNotFoundError):
+        store.delete("nope")

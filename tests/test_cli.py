@@ -6,6 +6,9 @@ from typer.testing import CliRunner
 
 import cli
 from core.config import Settings
+from models.blocks import Block
+from storage.base import Result
+from storage.router import get_block_storage, get_result_storage
 from tools.compose import ComposeOutcome
 
 MOCK_TEMPLATES = Path(__file__).resolve().parent / "fixtures" / "templates.yaml"
@@ -98,3 +101,102 @@ def test_compose_count_defaults_to_none(tmp_path, cli_settings, monkeypatch):
 
     assert result.exit_code == 0
     assert captured["count"] is None
+
+
+def test_blocks_delete_removes_existing_block(cli_settings):
+    store = get_block_storage(cli_settings)
+    store.save(Block(id="", body="# A block\nbody text"), filename_stem="a-block")
+
+    result = runner.invoke(cli.app, ["blocks", "delete", "a-block"])
+
+    assert result.exit_code == 0
+    assert "a-block" in result.output
+    assert not store.exists("a-block")
+
+
+def test_blocks_delete_missing_id_fails(cli_settings):
+    result = runner.invoke(cli.app, ["blocks", "delete", "does-not-exist"])
+
+    assert result.exit_code == 1
+    assert "does-not-exist" in result.output
+
+
+def test_results_delete_removes_existing_result(cli_settings):
+    store = get_result_storage(cli_settings)
+    store.save(Result(id="", content="result body", name="a-result", request="req"), filename_stem="a-result")
+
+    result = runner.invoke(cli.app, ["results", "delete", "a-result"])
+
+    assert result.exit_code == 0
+    assert "a-result" in result.output
+    assert not store.exists("a-result")
+
+
+def test_results_delete_missing_id_fails(cli_settings):
+    result = runner.invoke(cli.app, ["results", "delete", "does-not-exist"])
+
+    assert result.exit_code == 1
+    assert "does-not-exist" in result.output
+
+
+def test_results_list_empty_is_not_an_error(cli_settings):
+    result = runner.invoke(cli.app, ["results", "list"])
+
+    assert result.exit_code == 0
+
+
+def test_results_list_shows_saved_result(cli_settings):
+    store = get_result_storage(cli_settings)
+    store.save(
+        Result(id="", content="body", name="cover-letter", request="write a cover letter"),
+        filename_stem="cover-letter",
+    )
+
+    result = runner.invoke(cli.app, ["results", "list"])
+
+    assert result.exit_code == 0
+    assert "cover-letter" in result.output
+    assert "write a cover letter" in result.output
+
+
+def test_results_list_query_filters_to_matching_result(cli_settings):
+    store = get_result_storage(cli_settings)
+    store.save(Result(id="", content="body", name="frontend-summary", request="x"), filename_stem="frontend-summary")
+    store.save(Result(id="", content="body", name="backend-summary", request="y"), filename_stem="backend-summary")
+
+    result = runner.invoke(cli.app, ["results", "list", "--query", "frontend"])
+
+    assert result.exit_code == 0
+    assert "frontend-summary" in result.output
+    assert "backend-summary" not in result.output
+
+
+def test_results_show_prints_content_and_request_metadata(cli_settings):
+    store = get_result_storage(cli_settings)
+    store.save(
+        Result(
+            id="",
+            content="the full result content",
+            name="a-result",
+            request="aim for 2 backend projects",
+            use_ids=["block-1", "block-2"],
+            generate_criteria=["a rugged frontier outpost"],
+        ),
+        filename_stem="a-result",
+    )
+
+    result = runner.invoke(cli.app, ["results", "show", "a-result"])
+
+    assert result.exit_code == 0
+    assert "the full result content" in result.output
+    assert "aim for 2 backend projects" in result.output
+    assert "block-1" in result.output
+    assert "block-2" in result.output
+    assert "a rugged frontier outpost" in result.output
+
+
+def test_results_show_missing_id_fails(cli_settings):
+    result = runner.invoke(cli.app, ["results", "show", "does-not-exist"])
+
+    assert result.exit_code == 1
+    assert "does-not-exist" in result.output

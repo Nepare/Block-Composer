@@ -172,6 +172,7 @@ cvdocs blocks list                                    # see what's there
 cvdocs blocks list --tag <tag>
 cvdocs blocks list --query <text>                      # substring search over name/body
 cvdocs blocks show <block-id>
+cvdocs blocks delete <block-id>                        # permanent — no undo
 
 cvdocs generate --criteria "<what you want>"           # new block from scratch
 cvdocs generate -f criteria.md                          # ...or read criteria from a file
@@ -182,6 +183,11 @@ cvdocs compose "<natural-language request>"            # writes output/results/<
 cvdocs compose -f request.md                            # ...or read the request from a file
 cvdocs compose "<request>" --use <block-id> --generate "<criteria>"  # pin specific slots
 cvdocs compose "<request>" --dry-run                    # show the plan, write nothing
+
+cvdocs results list                                    # browse saved compose results
+cvdocs results list --query <text>                     # substring search over name/content
+cvdocs results show <result-id>                        # content + the request/pins/plan behind it
+cvdocs results delete <result-id>                      # permanent — no undo
 ```
 
 `-f`/`--criteria-file` (`generate`/`mutate`) and `-f`/`--request-file` (`compose`) read a

@@ -2,10 +2,11 @@
 (see storage/router.py's dispatch)."""
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
 
+import frontmatter
 from google.oauth2.credentials import Credentials
 
 from models.blocks import Block
@@ -31,6 +32,41 @@ class Result:
     def to_candidate(self) -> Candidate:
         return Candidate(name=self.name, full_text=self.content)
 
+    def to_post(self) -> frontmatter.Post:
+        meta = {
+            "id": self.id,
+            "name": self.name,
+            "request": self.request,
+            "use_ids": self.use_ids,
+            "generate_criteria": self.generate_criteria,
+            "slots": self.slots,
+            "created_at": (self.created_at or datetime.now(timezone.utc)).isoformat(),
+        }
+        return frontmatter.Post(self.content.strip() + "\n", **meta)
+
+    @classmethod
+    def from_post(cls, post: frontmatter.Post, *, default_id: str) -> "Result":
+        meta = post.metadata
+        created_at = None
+        raw = meta.get("created_at")
+        if isinstance(raw, datetime):
+            created_at = raw
+        elif isinstance(raw, str):
+            try:
+                created_at = datetime.fromisoformat(raw)
+            except ValueError:
+                created_at = None
+        return cls(
+            id=meta.get("id") or default_id,
+            content=post.content,
+            name=meta.get("name") or default_id,
+            request=meta.get("request", ""),
+            use_ids=list(meta.get("use_ids") or []),
+            generate_criteria=list(meta.get("generate_criteria") or []),
+            slots=list(meta.get("slots") or []),
+            created_at=created_at,
+        )
+
 
 class BlockStorage(Protocol):
     def path_for(self, filename_stem: str) -> Path | None: ...
@@ -45,6 +81,7 @@ class BlockStorage(Protocol):
     def save_with_dedup(
         self, block: Block, *, naming_client, naming_model: str, naming_constraints: str = ""
     ) -> tuple[NamingDecision, str | None]: ...
+    def delete(self, filename_stem: str) -> None: ...
 
 
 class ResultStorage(Protocol):
@@ -58,6 +95,7 @@ class ResultStorage(Protocol):
     def save_with_dedup(
         self, result: Result, *, naming_client, naming_model: str, naming_constraints: str = ""
     ) -> tuple[NamingDecision, str | None]: ...
+    def delete(self, filename_stem: str) -> None: ...
 
 
 class CredentialsStorage(Protocol):
