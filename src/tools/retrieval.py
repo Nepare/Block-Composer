@@ -93,20 +93,23 @@ def extract_retrieval_signals(
     return signals
 
 
-def extract_target_count(
-    request: str, client: LLMClient, model: str, constraints: str = ""
-) -> int | None:
+_NUMBER_RE = re.compile(r"\b(\d+)\b")
+
+
+def extract_target_count(request: str, client: LLMClient, model: str) -> int | None:
     """Pure function; applies the _request_mentions_count backstop before trusting a
-    parsed count. Never raises."""
-    prompt = target_count_prompt(request, constraints)
+    parsed count. Never raises -- tolerates a verbose reply by taking its last number."""
+    prompt = target_count_prompt(request)
     try:
-        reply = client.chat(prompt, model, temperature=0.0, max_tokens=10)
+        reply = client.chat(prompt, model, temperature=0.0, max_tokens=60)
     except Exception:
         return None
-    text = reply.strip()
-    if not text.isdigit() or int(text) <= 0:
+    numbers = _NUMBER_RE.findall(reply)
+    if not numbers:
         return None
-    count = int(text)
+    count = int(numbers[-1])
+    if count <= 0:
+        return None
     if not _request_mentions_count(request, count):
         return None
     return count

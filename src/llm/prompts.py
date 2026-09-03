@@ -150,15 +150,22 @@ def keyword_extraction_prompt(
 
 
 TARGET_COUNT_SYSTEM = (
-    "You read a request for a composed document and determine whether it explicitly states "
-    "a specific number of projects/entries it should contain (e.g. \"3 projects\" or \"five "
-    "examples\"). Reply with ONLY that number as a digit if it does, or the single word NONE "
-    "if it does not. No other text, no explanation."
+    "<task>Determine whether the request explicitly states a specific number of "
+    "projects/entries the composed document should contain.</task>\n"
+    "<input_example_1>\"3 projects\"</input_example_1>\n"
+    "<input_example_2>\"five examples\"</input_example_2>\n"
+    "<input_example_3>something else completely</input_example_3>\n"
+    "<output>A bare digit if it does, or the single word NONE if it does not. Nothing "
+    "else -- no tags, no explanation.</output>\n"
+    "<output_example_1>3</output_example_1>\n"
+    "<output_example_2>5</output_example_2>\n"
+    "<output_example_3>NONE</output_example_3>"
 )
 
 
-def target_count_prompt(request: str, constraints: str = "") -> list[dict[str, str]]:
+def target_count_prompt(request: str) -> list[dict[str, str]]:
+    """Deliberately bare and constraints-free -- a mechanical classifier gains nothing from prose."""
     return [
-        {"role": "system", "content": _with_constraints(TARGET_COUNT_SYSTEM, constraints)},
-        {"role": "user", "content": f"Request: {request}"},
+        {"role": "system", "content": TARGET_COUNT_SYSTEM},
+        {"role": "user", "content": f"<request>{request}</request>"},
     ]

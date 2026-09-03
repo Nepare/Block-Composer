@@ -240,8 +240,7 @@ def run_compose(
         target_count = count
     elif request.strip():
         naming_client, naming_model = get_client_and_model(settings.llm.models.naming, settings, on_progress=progress)
-        compose_constraints = constraints_module.load(settings, "compose")
-        target_count = extract_target_count(request, naming_client, naming_model, compose_constraints)
+        target_count = extract_target_count(request, naming_client, naming_model)
 
     required_planned: int | None = None
     if target_count is not None:

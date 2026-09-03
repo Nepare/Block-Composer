@@ -228,14 +228,29 @@ def test_planning_call_includes_constraints_file_in_the_system_prompt(settings, 
 
     compose_module.run_compose("need a school", settings=settings)
 
-    # the target-count-detection call loads the same compose_constraints and reuses them
-    detection_system_message = client.calls[0]["messages"][0]["content"]
-    assert "Prefer mutate over generate." in detection_system_message
     planning_system_message = client.calls[2]["messages"][0]["content"]
     assert "Prefer mutate over generate." in planning_system_message
     # the result-naming call shares the compose tier's constraints file too
     naming_system_message = client.calls[3]["messages"][0]["content"]
     assert "Prefer mutate over generate." in naming_system_message
+
+
+def test_target_count_detection_call_never_receives_compose_constraints(settings, fake_router, tmp_path):
+    _seed_library(settings)
+    constraints_file = tmp_path / "COMPOSE_CONSTRAINTS.md"
+    constraints_file.write_text("Prefer mutate over generate.", encoding="utf-8")
+    settings.path.constraints.compose = str(constraints_file)
+
+    plan = json.dumps({"steps": [{"order": 1, "action": "use", "block_id": "school", "criteria": None}]})
+    unparseable_keywords_reply = "I cannot help with that."
+    client = FakeLLMClient(replies=["NONE", unparseable_keywords_reply, plan, "school_result"])
+    fake_router(compose_module, client)
+
+    compose_module.run_compose("need a school", settings=settings)
+
+    detection_system_message = client.calls[0]["messages"][0]["content"]
+    assert "Prefer mutate over generate." not in detection_system_message
+    assert "<task>" in detection_system_message
 
 
 def test_keyword_extraction_call_includes_the_keywords_tier_constraints_file(settings, fake_router, tmp_path):

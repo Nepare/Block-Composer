@@ -212,6 +212,22 @@ def test_extract_target_count_accepts_a_spelled_out_count_present_in_the_request
     assert count == 3
 
 
+def test_extract_target_count_takes_the_last_number_from_a_verbose_reply():
+    client = FakeLLMClient(replies=["The request mentions 3 projects, so my answer is 3"])
+
+    count = extract_target_count("give me 3 projects", client, "m")
+
+    assert count == 3
+
+
+def test_extract_target_count_verbose_reply_with_no_number_is_none():
+    client = FakeLLMClient(replies=["I don't see a specific count stated anywhere"])
+
+    count = extract_target_count("highlight backend infrastructure work", client, "m")
+
+    assert count is None
+
+
 def test_score_block_default_keyword_weight_matches_explicit_none():
     keywords = CategorizedKeywords(role=["engineer"], responsibilities=["shipped features"])
     block = Block(id="x", body="## Engineer Project\n\nDid stuff.\n\n**Responsibilities:**\n- shipped features\n")
