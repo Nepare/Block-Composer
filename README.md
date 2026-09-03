@@ -276,11 +276,11 @@ They live in a gitignored `.env` instead: `OPENROUTER_API_KEY` always; `GOOGLE_W
 
 ## `input_prompts/constraints/`
 
-Four files — `GENERATE_CONSTRAINTS.md`, `NAMING_CONSTRAINTS.md`, `MUTATE_CONSTRAINTS.md`,
-`COMPOSE_CONSTRAINTS.md` — work like `CLAUDE.md`/`AGENTS.md`: whatever you write in one is
-appended to that tool's system prompt on every call. Use them for negative constraints
-("don't do X") specific to your own use of the tool. Empty by default; a missing file is
-simply treated as no constraints, never an error.
+Five files — `GENERATE_CONSTRAINTS.md`, `NAMING_CONSTRAINTS.md`, `MUTATE_CONSTRAINTS.md`,
+`COMPOSE_CONSTRAINTS.md`, `KEYWORDS_CONSTRAINTS.md` — work like `CLAUDE.md`/`AGENTS.md`: 
+whatever you write in one is appended to that tool's system prompt on every call. Use them 
+for negative constraints ("don't do X") specific to your own use of the tool. A missing or 
+empty file is treated as no constraints, never an error.
 
 ## Tests
 
