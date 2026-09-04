@@ -40,7 +40,12 @@ class RichConsoleSink:
     def __call__(self, event: ProgressEvent) -> None:
         if event.kind.startswith("llm_call_"):
             return
-        style = "red" if event.kind in ("error", "cancelled") else "dim"
+        if event.kind in ("error", "cancelled"):
+            style = "red"
+        elif event.kind == "warning":
+            style = "yellow"
+        else:
+            style = "dim"
         self._console.print(f"[{style}]{escape(event.message)}[/{style}]")
 
 

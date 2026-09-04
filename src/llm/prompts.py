@@ -56,26 +56,47 @@ def mutate_prompt(original_body: str, criteria: str, constraints: str = "") -> l
     ]
 
 
-COMPOSE_SYSTEM = (
-    "You plan a composed document from a small personal block library, given a "
-    "natural-language request and a catalog of available blocks (id, tags, full content). For "
-    "every part of the request, choose one of:\n"
-    "  - use <block_id> — an existing block is a close match, reuse it as-is\n"
-    "  - mutate <block_id> :: <criteria> — the closest available block is only a partial "
-    "match; PREFER THIS over generate whenever any reasonable partial match exists, and "
-    "give a specific one-line change request\n"
-    "  - generate :: <criteria> — nothing in the catalog is even a partial fit\n\n"
-    "Also decide the final order the pieces should appear in, per the request's own "
-    "ordering logic if it states one.\n\n"
-    "Reply with ONLY a JSON object of this shape, nothing else:\n"
-    "{\n"
-    '  "steps": [\n'
-    '    {"order": 1, "action": "use", "block_id": "...", "criteria": null},\n'
-    '    {"order": 2, "action": "mutate", "block_id": "...", "criteria": "..."},\n'
-    '    {"order": 3, "action": "generate", "block_id": null, "criteria": "..."}\n'
-    "  ]\n"
-    "}"
-)
+def _compose_system(allow_mutate: bool, allow_generate: bool) -> str:
+    system = (
+        "You plan a composed document from a small personal block library, given a "
+        "natural-language request and a catalog of available blocks (id, tags, full content). For "
+        "every part of the request, choose one of:\n"
+        "  - use <block_id> — an existing block is a close match, reuse it as-is\n"
+    )
+    example_steps = ['{"order": 1, "action": "use", "block_id": "...", "criteria": null}']
+    if allow_mutate:
+        # the comparison to generate only makes sense when generate is itself an option
+        if allow_generate:
+            system += (
+                "  - mutate <block_id> :: <criteria> — the closest available block is only a partial "
+                "match; PREFER THIS over generate whenever any reasonable partial match exists, and "
+                "give a specific one-line change request\n"
+            )
+        else:
+            system += (
+                "  - mutate <block_id> :: <criteria> — the closest available block is only a partial "
+                "match; give a specific one-line change request\n"
+            )
+        example_steps.append(
+            f'{{"order": {len(example_steps) + 1}, "action": "mutate", "block_id": "...", "criteria": "..."}}'
+        )
+    if allow_generate:
+        system += "  - generate :: <criteria> — nothing in the catalog is even a partial fit\n"
+        example_steps.append(
+            f'{{"order": {len(example_steps) + 1}, "action": "generate", "block_id": null, "criteria": "..."}}'
+        )
+    steps_block = ",\n".join(f"    {step}" for step in example_steps)
+    system += (
+        "\nAlso decide the final order the pieces should appear in, per the request's own "
+        "ordering logic if it states one.\n\n"
+        "Reply with ONLY a JSON object of this shape, nothing else:\n"
+        "{\n"
+        '  "steps": [\n'
+        f"{steps_block}\n"
+        "  ]\n"
+        "}"
+    )
+    return system
 
 
 def compose_prompt(
@@ -84,6 +105,8 @@ def compose_prompt(
     pinned_note: str,
     constraints: str = "",
     required_count: int | None = None,
+    allow_mutate: bool = True,
+    allow_generate: bool = True,
 ) -> list[dict[str, str]]:
     catalog_text = "\n\n".join(
         f"### {b['id']} (tags: {', '.join(b['tags'])})\n{b['body']}" for b in catalog
@@ -94,7 +117,7 @@ def compose_prompt(
     if required_count is not None:
         user += f"\n\nYour plan's \"steps\" list MUST contain exactly {required_count} entries — no more, no fewer."
     return [
-        {"role": "system", "content": _with_constraints(COMPOSE_SYSTEM, constraints)},
+        {"role": "system", "content": _with_constraints(_compose_system(allow_mutate, allow_generate), constraints)},
         {"role": "user", "content": user},
     ]
 

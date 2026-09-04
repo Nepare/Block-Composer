@@ -192,6 +192,8 @@ cvdocs compose "<request>" --use <block-id> --generate "<criteria>"  # pin speci
 cvdocs compose "<request>" --dry-run                    # show the plan, write nothing
 cvdocs compose "<request>" --name <name>                # skip the naming call, use this name
 cvdocs compose "<request>" --preserve                    # lock the produced result on creation
+cvdocs compose "<request>" --restrict-generate           # forbid brand-new blocks in the result
+cvdocs compose "<request>" --restrict-mutate             # forbid edited variants; existing blocks used as-is
 
 cvdocs results list                                    # browse saved compose results
 cvdocs results list --query <text>                     # substring search over name/content
@@ -217,6 +219,18 @@ entry is exempt from `blocks clear`/`results clear`, though `blocks delete`/`res
 can still remove it directly by design (a future frontend is expected to disable its own
 delete button for locked entries instead).
 
+`compose`'s `--restrict-generate` forbids the planner from producing any brand-new block;
+if the library as a whole can't supply enough blocks for the requested result, the command
+is rejected up front, before any work starts, naming the shortfall, and if the library has
+enough overall but compose's own candidate-narrowing window is configured too small to
+surface them, the window is widened automatically and a warning distinct from routine
+progress output is shown. It is rejected outright when combined with `--generate`, since the
+two directly contradict each other. `--restrict-mutate` forbids the planner from producing
+any edited variant of an existing block, so every existing block in the result appears
+exactly as originally authored; it has no equivalent feasibility check. The two flags are
+independent and may be combined, in which case the result is built entirely from existing
+blocks used exactly as-is.
+
 ### HTTP
 
 Requires the hosted deployment from [Setup 3.2](#32-hosted-deployment-docker)
@@ -237,8 +251,15 @@ HTTP, gated by the same `?key=<CVDOCS_API_KEY>` credential as `/auth/google/logi
   (a shorter free-text field merged into `request` server-side) — accepts `request`,
   `specifiers`, `use_ids`, `generate_criteria`, `count` (`null` lets the model decide), `model`,
   `name` (skip the naming-model call, `_2`/`_3`/... on collision), `preserve` (lock the produced
-  result on creation), and `max_generate`; no filesystem output path or dry-run mode over HTTP.
-  Also returns `{"job_id": "..."}` immediately. Unlike the other three tools, a compose run is
+  result on creation), `max_generate`, `restrict_generate`, and `restrict_mutate`; no filesystem
+  output path or dry-run mode over HTTP. `restrict_generate` forbids the planner from producing
+  any brand-new block (rejected up front, before any work starts, if the library overall can't
+  supply enough blocks for the request, naming the shortfall; the candidate-narrowing window is
+  widened automatically with a distinct warning if it's just configured too small) and is
+  rejected outright alongside a non-empty `generate_criteria`; `restrict_mutate` forbids any
+  edited variant of an existing block, so every existing block in the result appears exactly as
+  originally authored. Both default to `false` and may be combined. Also returns
+  `{"job_id": "..."}` immediately. Unlike the other three tools, a compose run is
   cancellable — see `POST /cancel/{job_id}` below. Its final outcome includes the finished
   document's `content`, saved `name`/`result_id`, and the ordered `slots` that produced it
   (`result_id`/`name`/`content` are `null` if the run was cancelled instead of completing).

@@ -203,6 +203,8 @@ def compose(
     dry_run: bool = typer.Option(False, "--dry-run"),
     count: Optional[int] = typer.Option(None, "--count", "-n", help="Exact target number of projects in the output."),
     preserve: bool = typer.Option(False, "--preserve"),
+    restrict_generate: bool = typer.Option(False, "--restrict-generate"),
+    restrict_mutate: bool = typer.Option(False, "--restrict-mutate"),
 ):
     settings = _settings()
     try:
@@ -226,6 +228,8 @@ def compose(
             dry_run=dry_run,
             count=count,
             preserve=preserve,
+            restrict_generate=restrict_generate,
+            restrict_mutate=restrict_mutate,
             on_progress=RichConsoleSink(console),
         )
     except CvdocsError as exc:

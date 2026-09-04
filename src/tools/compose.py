@@ -42,12 +42,21 @@ def _catalog(blocks: list[Block]) -> list[dict]:
     return [{"id": b.id, "tags": b.tags, "body": b.body.strip()} for b in blocks]
 
 
+def _next_unused_candidate(candidates: list[Block], claimed_ids: set[str]) -> str | None:
+    for block in candidates:
+        if block.id not in claimed_ids:
+            return block.id
+    return None
+
+
 def _select_candidate_blocks(
     request: str,
     store: BlockStorage,
     exclude_ids: set[str],
     settings: Settings,
     progress: ProgressSink,
+    restrict_generate: bool = False,
+    required_count: int | None = None,
 ) -> list[Block]:
     """Narrows the block library to the blocks matching keywords extracted from the request."""
     blocks = [b for b in store.all() if b.id not in exclude_ids]
@@ -86,9 +95,20 @@ def _select_candidate_blocks(
         )
     )
     top_n = settings.behavior.compose.keyword_search_top_n
-    narrowed = rank_blocks(
-        blocks, keywords, top_n=top_n, unmatched_reserve=settings.behavior.compose.keyword_search_unmatched_reserve
-    )
+    unmatched_reserve = settings.behavior.compose.keyword_search_unmatched_reserve
+    if restrict_generate and required_count is not None and top_n < required_count:
+        progress(
+            ProgressEvent(
+                kind="warning",
+                message=(
+                    f"--restrict-generate: narrowing window ({top_n}) is smaller than the "
+                    f"{required_count} project(s) still needed — widening to {required_count}."
+                ),
+            )
+        )
+        top_n = required_count
+        unmatched_reserve = required_count
+    narrowed = rank_blocks(blocks, keywords, top_n=top_n, unmatched_reserve=unmatched_reserve)
     progress(
         ProgressEvent(
             kind="narrowing_done", message=f"Narrowed to {len(narrowed)} of {len(blocks)} block(s) in the library"
@@ -118,9 +138,13 @@ def _plan_with_llm(
     progress: ProgressSink,
     *,
     required_count: int | None = None,
+    restrict_generate: bool = False,
+    restrict_mutate: bool = False,
 ) -> list[ComposeSlot]:
     client, model = get_client_and_model(model_spec or settings.llm.models.compose, settings, on_progress=progress)
-    candidate_blocks = _select_candidate_blocks(request, store, pinned_ids, settings, progress)
+    candidate_blocks = _select_candidate_blocks(
+        request, store, pinned_ids, settings, progress, restrict_generate=restrict_generate, required_count=required_count
+    )
     catalog = _catalog(candidate_blocks)
     pinned_note = (
         f"Already pinned/handled by the user, do not repeat these: {', '.join(pinned_ids)}"
@@ -128,7 +152,15 @@ def _plan_with_llm(
         else ""
     )
     compose_constraints = constraints_module.load(settings, "compose")
-    messages = compose_prompt(request, catalog, pinned_note, compose_constraints, required_count=required_count)
+    messages = compose_prompt(
+        request,
+        catalog,
+        pinned_note,
+        compose_constraints,
+        required_count=required_count,
+        allow_mutate=not restrict_mutate,
+        allow_generate=not restrict_generate,
+    )
     progress(ProgressEvent(kind="plan_start", message=f"Planning against {len(catalog)} block(s) in the library…"))
     reply = client.chat(messages, model, temperature=0.3, max_tokens=1200)
     try:
@@ -158,19 +190,32 @@ def _plan_with_llm(
             )
         )
 
-    if required_count is not None and len(slots) != required_count:
+    count_mismatch = required_count is not None and len(slots) != required_count
+    illegal_slots = [
+        s
+        for s in slots
+        if (restrict_generate and s.action == "generate") or (restrict_mutate and s.action == "mutate")
+    ]
+
+    if count_mismatch or illegal_slots:
+        problems = []
+        if count_mismatch:
+            problems.append(f"had {len(slots)} step(s), but exactly {required_count} are required")
+        if illegal_slots:
+            bad_actions = sorted({s.action for s in illegal_slots})
+            problems.append(f"used a currently-disallowed action ({', '.join(bad_actions)})")
         progress(
             ProgressEvent(
                 kind="plan_retry",
-                message=f"Plan had {len(slots)} step(s), {required_count} required — retrying once…",
+                message=f"Plan {' and '.join(problems)} — retrying once…",
             )
         )
         retry_messages = messages + [
             {"role": "assistant", "content": reply},
             {
                 "role": "user",
-                "content": f"Your plan had {len(slots)} steps, but exactly {required_count} are "
-                "required. Reply again with the corrected JSON object only, no commentary.",
+                "content": f"Your plan {' and '.join(problems)}. Reply again with the corrected "
+                "JSON object only, no commentary.",
             },
         ]
         retry_reply = client.chat(retry_messages, model, temperature=0.3, max_tokens=1200)
@@ -188,16 +233,49 @@ def _plan_with_llm(
         except LLMError:
             pass  # keep whatever `slots` already held from the last successfully-parsed attempt
 
+    claimed_ids = set()
+    corrected_slots = []
+    for s in slots:
+        if restrict_generate and s.action == "generate":
+            new_id = _next_unused_candidate(candidate_blocks, claimed_ids)
+            if new_id is not None:
+                claimed_ids.add(new_id)
+                s = ComposeSlot(order=s.order, action="use", block_id=new_id, criteria=None)
+        elif restrict_mutate and s.action == "mutate":
+            if s.block_id and s.block_id not in claimed_ids:
+                claimed_ids.add(s.block_id)
+                s = ComposeSlot(order=s.order, action="use", block_id=s.block_id, criteria=None)
+            else:
+                new_id = _next_unused_candidate(candidate_blocks, claimed_ids)
+                if new_id is not None:
+                    claimed_ids.add(new_id)
+                    s = ComposeSlot(order=s.order, action="use", block_id=new_id, criteria=None)
+        elif s.block_id:
+            claimed_ids.add(s.block_id)
+        corrected_slots.append(s)
+    slots = corrected_slots
+
     if required_count is not None and len(slots) != required_count:
         ordered_slots = sorted(slots, key=lambda s: s.order)
         if len(ordered_slots) > required_count:
             slots = ordered_slots[:required_count]
         else:
             next_order = (max((s.order for s in ordered_slots), default=0)) + 1
-            padding = [
-                ComposeSlot(order=next_order + i, action="generate", block_id=None, criteria=request)
-                for i in range(required_count - len(ordered_slots))
-            ]
+            shortfall = required_count - len(ordered_slots)
+            if restrict_generate:
+                claimed_ids = {s.block_id for s in ordered_slots if s.block_id}
+                padding = []
+                for i in range(shortfall):
+                    new_id = _next_unused_candidate(candidate_blocks, claimed_ids)
+                    if new_id is None:
+                        break
+                    claimed_ids.add(new_id)
+                    padding.append(ComposeSlot(order=next_order + i, action="use", block_id=new_id, criteria=None))
+            else:
+                padding = [
+                    ComposeSlot(order=next_order + i, action="generate", block_id=None, criteria=request)
+                    for i in range(shortfall)
+                ]
             slots = ordered_slots + padding
 
     return slots
@@ -218,6 +296,8 @@ def run_compose(
     preserve: bool = False,
     on_progress: ProgressSink | None = None,
     cancel_check: Callable[[], bool] | None = None,
+    restrict_generate: bool = False,
+    restrict_mutate: bool = False,
 ) -> ComposeOutcome:
     """`cancel_check`, if given, is polled between slots — a True stops execution before the
     next slot, keeping any blocks/mutations already produced but skipping the final result."""
@@ -234,6 +314,12 @@ def run_compose(
 
     if count is not None and count <= 0:
         raise BlockValidationError(f"--count must be a positive integer, got {count}.")
+
+    if restrict_generate and generate_criteria:
+        raise BlockValidationError(
+            "--restrict-generate cannot be combined with --generate (a pinned new-block "
+            "request) — these directly contradict each other."
+        )
 
     for uid in use_ids:
         store.load(uid)  # raises BlockNotFoundError early if a pinned id doesn't exist
@@ -256,6 +342,12 @@ def run_compose(
         naming_client, naming_model = get_client_and_model(settings.llm.models.naming, settings, on_progress=progress)
         target_count = extract_target_count(request, naming_client, naming_model)
 
+    if restrict_generate and target_count is not None and target_count > len(store.all()):
+        raise BlockValidationError(
+            f"--restrict-generate: requested {target_count} project(s), but the library only "
+            f"has {len(store.all())} block(s) available."
+        )
+
     required_planned: int | None = None
     if target_count is not None:
         required_planned = max(target_count - total_pinned, 0)
@@ -264,10 +356,27 @@ def run_compose(
     if target_count is not None:
         if required_planned > 0:
             planned_slots = _plan_with_llm(
-                request, store, set(use_ids), settings, model_spec, progress, required_count=required_planned
+                request,
+                store,
+                set(use_ids),
+                settings,
+                model_spec,
+                progress,
+                required_count=required_planned,
+                restrict_generate=restrict_generate,
+                restrict_mutate=restrict_mutate,
             )
     elif request.strip():
-        planned_slots = _plan_with_llm(request, store, set(use_ids), settings, model_spec, progress)
+        planned_slots = _plan_with_llm(
+            request,
+            store,
+            set(use_ids),
+            settings,
+            model_spec,
+            progress,
+            restrict_generate=restrict_generate,
+            restrict_mutate=restrict_mutate,
+        )
     if planned_slots:
         for i, slot in enumerate(planned_slots):
             slot.order = total_pinned + i + 1

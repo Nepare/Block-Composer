@@ -903,3 +903,246 @@ def test_invalid_explicit_name_is_rejected_before_any_work(settings, fake_router
     # rejected before even the pinned-use existence check (BlockNotFoundError never raised)
     # or any generate/mutate/planning/naming LLM call
     assert client.call_count == 0
+
+
+def test_restrict_generate_corrects_planner_generate_to_use(settings, fake_router):
+    _seed_library(settings)
+    illegal_plan = json.dumps(
+        {"steps": [{"order": 1, "action": "generate", "block_id": None, "criteria": "a filler entry"}]}
+    )
+    unparseable_keywords_reply = "I cannot help with that."
+    client = FakeLLMClient(replies=[unparseable_keywords_reply, illegal_plan, illegal_plan, "result_name"])
+    fake_router(compose_module, client)
+
+    outcome = compose_module.run_compose(
+        "need a filler entry", settings=settings, count=1, restrict_generate=True
+    )
+
+    assert len(outcome.slots) == 1
+    slot = outcome.slots[0]
+    assert slot.action == "use"
+    assert slot.block_id in ("school", "police_station")
+    assert client.call_count == 4
+
+
+def test_restrict_generate_pads_shortfall_with_use_not_generate(settings, fake_router):
+    _seed_library(settings)
+    wrong_plan = json.dumps({"steps": [{"order": 1, "action": "use", "block_id": "school", "criteria": None}]})
+    unparseable_keywords_reply = "I cannot help with that."
+    client = FakeLLMClient(replies=[unparseable_keywords_reply, wrong_plan, wrong_plan, "result_name"])
+    fake_router(compose_module, client)
+
+    outcome = compose_module.run_compose(
+        "need two projects", settings=settings, count=2, restrict_generate=True
+    )
+
+    assert len(outcome.slots) == 2
+    assert all(s.action == "use" for s in outcome.slots)
+    assert {s.block_id for s in outcome.slots} == {"school", "police_station"}
+    assert client.call_count == 4
+
+
+def test_restrict_mutate_corrects_planner_mutate_to_use_same_block(settings, fake_router):
+    _seed_library(settings)
+    illegal_plan = json.dumps(
+        {"steps": [{"order": 1, "action": "mutate", "block_id": "school", "criteria": "re-theme"}]}
+    )
+    unparseable_keywords_reply = "I cannot help with that."
+    client = FakeLLMClient(replies=[unparseable_keywords_reply, illegal_plan, illegal_plan, "result_name"])
+    fake_router(compose_module, client)
+
+    outcome = compose_module.run_compose(
+        "adapt the school", settings=settings, count=1, restrict_mutate=True
+    )
+
+    assert len(outcome.slots) == 1
+    slot = outcome.slots[0]
+    assert slot.action == "use"
+    assert slot.block_id == "school"
+    assert slot.criteria is None
+    assert client.call_count == 4
+
+
+def test_restrict_mutate_falls_back_when_block_id_already_claimed(settings, fake_router):
+    _seed_library(settings)
+    plan = json.dumps(
+        {
+            "steps": [
+                {"order": 1, "action": "use", "block_id": "school", "criteria": None},
+                {"order": 2, "action": "mutate", "block_id": "school", "criteria": "re-theme"},
+            ]
+        }
+    )
+    unparseable_keywords_reply = "I cannot help with that."
+    client = FakeLLMClient(replies=[unparseable_keywords_reply, plan, plan, "result_name"])
+    fake_router(compose_module, client)
+
+    outcome = compose_module.run_compose(
+        "need two related entries", settings=settings, count=2, restrict_mutate=True
+    )
+
+    assert len(outcome.slots) == 2
+    assert all(s.action == "use" for s in outcome.slots)
+    assert {s.block_id for s in outcome.slots} == {"school", "police_station"}
+
+
+def test_both_restrictions_together_produce_use_only_plan(settings, fake_router):
+    _seed_library(settings)
+    plan = json.dumps(
+        {
+            "steps": [
+                {"order": 1, "action": "generate", "block_id": None, "criteria": "brand new"},
+                {"order": 2, "action": "mutate", "block_id": "school", "criteria": "re-theme"},
+            ]
+        }
+    )
+    unparseable_keywords_reply = "I cannot help with that."
+    client = FakeLLMClient(replies=[unparseable_keywords_reply, plan, plan, "result_name"])
+    fake_router(compose_module, client)
+
+    outcome = compose_module.run_compose(
+        "need two entries", settings=settings, count=2, restrict_generate=True, restrict_mutate=True
+    )
+
+    assert len(outcome.slots) == 2
+    assert all(s.action == "use" for s in outcome.slots)
+    assert {s.block_id for s in outcome.slots} == {"school", "police_station"}
+
+
+def test_restrict_generate_conflicts_with_pinned_generate(settings, fake_router):
+    _seed_library(settings)
+    with pytest.raises(BlockValidationError):
+        compose_module.run_compose(
+            "", settings=settings, generate_criteria=["a sawmill"], restrict_generate=True
+        )
+
+
+def test_hard_rejection_when_target_exceeds_raw_library_size(settings, fake_router):
+    _seed_large_library(settings, count=3)
+    client = FakeLLMClient(replies=[])
+    fake_router(compose_module, client)
+
+    with pytest.raises(BlockValidationError):
+        compose_module.run_compose(
+            "need many projects", settings=settings, count=5, restrict_generate=True
+        )
+    assert client.call_count == 0
+
+
+def test_hard_rejection_ignores_pinned_count_and_uses_raw_total(settings, fake_router):
+    _seed_large_library(settings, count=4)
+    client = FakeLLMClient(replies=[])
+    fake_router(compose_module, client)
+
+    with pytest.raises(BlockValidationError):
+        compose_module.run_compose(
+            "", settings=settings, use_ids=["block_0"], count=5, restrict_generate=True
+        )
+    assert client.call_count == 0
+
+
+def test_hard_rejection_does_not_fire_when_generation_is_unrestricted(settings, fake_router):
+    _seed_large_library(settings, count=3)
+    plan = json.dumps(
+        {
+            "steps": [
+                {"order": 1, "action": "use", "block_id": "block_0", "criteria": None},
+                {"order": 2, "action": "use", "block_id": "block_1", "criteria": None},
+                {"order": 3, "action": "use", "block_id": "block_2", "criteria": None},
+                {"order": 4, "action": "generate", "block_id": None, "criteria": "extra one"},
+                {"order": 5, "action": "generate", "block_id": None, "criteria": "extra two"},
+            ]
+        }
+    )
+    unparseable_keywords_reply = "I cannot help with that."
+    client = FakeLLMClient(replies=[unparseable_keywords_reply, plan])
+    fake_router(compose_module, client)
+
+    outcome = compose_module.run_compose(
+        "need five projects", settings=settings, count=5, restrict_generate=False, dry_run=True
+    )
+
+    assert len(outcome.slots) == 5
+
+
+def test_hard_rejection_does_not_fire_when_count_fits_the_library(settings, fake_router):
+    _seed_large_library(settings, count=3)
+    plan = json.dumps(
+        {
+            "steps": [
+                {"order": 1, "action": "use", "block_id": "block_0", "criteria": None},
+                {"order": 2, "action": "use", "block_id": "block_1", "criteria": None},
+                {"order": 3, "action": "use", "block_id": "block_2", "criteria": None},
+            ]
+        }
+    )
+    unparseable_keywords_reply = "I cannot help with that."
+    client = FakeLLMClient(replies=[unparseable_keywords_reply, plan])
+    fake_router(compose_module, client)
+
+    outcome = compose_module.run_compose(
+        "need three projects", settings=settings, count=3, restrict_generate=True, dry_run=True
+    )
+
+    assert len(outcome.slots) == 3
+
+
+def test_warning_widens_narrowing_window_when_configured_top_n_is_too_small(settings, fake_router):
+    settings.behavior.compose.keyword_search_top_n = 2
+    _seed_large_library(settings, count=5)
+    keywords_reply = "ROLE: \nENVIRONMENT: Jira\nRESPONSIBILITIES: \nDOMAIN: \n"
+    plan = json.dumps(
+        {
+            "steps": [
+                {"order": 1, "action": "use", "block_id": "block_0", "criteria": None},
+                {"order": 2, "action": "use", "block_id": "block_1", "criteria": None},
+                {"order": 3, "action": "use", "block_id": "block_2", "criteria": None},
+                {"order": 4, "action": "use", "block_id": "block_3", "criteria": None},
+            ]
+        }
+    )
+    client = FakeLLMClient(replies=[keywords_reply, plan])
+    fake_router(compose_module, client)
+    events: list[ProgressEvent] = []
+
+    outcome = compose_module.run_compose(
+        "need four projects",
+        settings=settings,
+        count=4,
+        restrict_generate=True,
+        dry_run=True,
+        on_progress=events.append,
+    )
+
+    assert len(outcome.slots) == 4
+    assert any(e.kind == "warning" for e in events)
+
+
+def test_no_warning_when_configured_top_n_already_suffices(settings, fake_router):
+    _seed_large_library(settings, count=5)
+    keywords_reply = "ROLE: \nENVIRONMENT: Jira\nRESPONSIBILITIES: \nDOMAIN: \n"
+    plan = json.dumps(
+        {
+            "steps": [
+                {"order": 1, "action": "use", "block_id": "block_0", "criteria": None},
+                {"order": 2, "action": "use", "block_id": "block_1", "criteria": None},
+                {"order": 3, "action": "use", "block_id": "block_2", "criteria": None},
+                {"order": 4, "action": "use", "block_id": "block_3", "criteria": None},
+            ]
+        }
+    )
+    client = FakeLLMClient(replies=[keywords_reply, plan])
+    fake_router(compose_module, client)
+    events: list[ProgressEvent] = []
+
+    outcome = compose_module.run_compose(
+        "need four projects",
+        settings=settings,
+        count=4,
+        restrict_generate=True,
+        dry_run=True,
+        on_progress=events.append,
+    )
+
+    assert len(outcome.slots) == 4
+    assert not any(e.kind == "warning" for e in events)

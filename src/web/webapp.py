@@ -111,6 +111,8 @@ class ComposeStartRequest(BaseModel):
     max_generate: int | None = None
     name: str | None = None
     preserve: bool = False
+    restrict_generate: bool = False
+    restrict_mutate: bool = False
 
 
 class BlockUpdateRequest(BaseModel):
@@ -369,6 +371,13 @@ def compose_start(payload: ComposeStartRequest, key: str):
     if payload.count is not None and payload.count <= 0:
         return PlainTextResponse(f"count must be a positive integer, got {payload.count}.", status_code=400)
 
+    if payload.restrict_generate and payload.generate_criteria:
+        return PlainTextResponse(
+            "restrict_generate cannot be combined with generate_criteria (a pinned new-block "
+            "request) — these directly contradict each other.",
+            status_code=400,
+        )
+
     if payload.name is not None:
         try:
             validate_explicit_name(payload.name)
@@ -388,6 +397,8 @@ def compose_start(payload: ComposeStartRequest, key: str):
             on_progress=on_progress,
             cancel_check=cancel_event.is_set,
             preserve=payload.preserve,
+            restrict_generate=payload.restrict_generate,
+            restrict_mutate=payload.restrict_mutate,
         )
         return {
             "result_id": outcome.result_id,
