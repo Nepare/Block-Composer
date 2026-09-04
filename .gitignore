@@ -4,14 +4,20 @@ credentials/*.json
 
 # Local generated data
 output/blocks/*.md
+output/blocks/.naming.lock
 output/results/*.md
 output/results/*.json
+output/results/.naming.lock
+output/cvdocs.db
 
 # Agent state
 .claude/
 
 # Specify sessions
 specs/
+
+# Graphify knowledge graph
+graphify-out/
 
 # Python
 __pycache__/

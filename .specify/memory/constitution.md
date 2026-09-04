@@ -1,13 +1,12 @@
 <!--
 Sync Impact Report
-- Version change: 1.1.0 → 2.0.0
-- Modified principles: V. Single Source of Truth for Configuration — redefined
-  (backward-incompatible): the CVDOCS_STORAGE_BACKEND-style env-var carve-out for
-  deployment-environment facts is removed. Every setting, including ones that differ by
-  deployment target, must be expressed as values inside config.yaml; a genuine runtime fact
-  (e.g. containerization) is detected directly (e.g. checking for /.dockerenv) and used only
-  to select between config.yaml values, never sourced from an env var. Env vars are now
-  reserved exclusively for secrets.
+- Version change: 2.0.0 → 2.1.0
+- Modified principles: III. Live Verification Over the Real Stack — clarified (additive,
+  non-breaking): live-verification calls should be batched into a single script/tool
+  invocation where practical rather than run one-by-one, and frontend verification should
+  lean on code/log/network-level checks rather than iterative screenshot/computer-vision
+  analysis, reserving a screenshot for a final sanity check. The core requirement (a real
+  run against the real stack before a feature is done) is unchanged.
 - Added principles: none
 - Added sections: none
 - Removed sections: none
@@ -43,7 +42,11 @@ library, real generated/mutated files or DB rows) and the actual output inspecte
 with fakes (`tests/fakes.py`) catch logic bugs; only a live run catches real-model behavior
 (hallucination, retries, non-determinism, prompt drift) that a scripted fake cannot
 reproduce. Live-verification artifacts created during this process MUST be cleaned up before
-the work is reported done, unless the user asks otherwise.
+the work is reported done, unless the user asks otherwise. Live-verification calls SHOULD be
+batched into a single script/tool invocation rather than run one-by-one, to conserve session
+budget; when verifying frontend, verification SHOULD lean on code/log/network-level checks
+rather than iterative screenshot/computer-vision analysis, reserving a screenshot for a final
+sanity check rather than the verification loop itself.
 
 ### IV. Decoupled, Independently Testable Core Logic
 Core decision logic (naming/dedup decisions, retrieval scoring, field parsing) MUST take
@@ -101,4 +104,4 @@ PR/commit description or session summary at the time it happens, not retrofitted
 Complexity (a new dependency, a new abstraction layer, a new config axis) must be justified
 against Principle II before it's added.
 
-**Version**: 2.0.0 | **Ratified**: 2026-09-01 | **Last Amended**: 2026-09-02
+**Version**: 2.1.0 | **Ratified**: 2026-09-01 | **Last Amended**: 2026-09-04

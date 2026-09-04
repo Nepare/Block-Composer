@@ -173,21 +173,33 @@ cvdocs blocks list --tag <tag>
 cvdocs blocks list --query <text>                      # substring search over name/body
 cvdocs blocks show <block-id>
 cvdocs blocks delete <block-id>                        # permanent — no undo
+cvdocs blocks preserve <block-id>                      # lock — exempt from `blocks clear`
+cvdocs blocks unpreserve <block-id>                    # unlock
+cvdocs blocks clear                                    # delete every non-preserved block
 
 cvdocs generate --criteria "<what you want>"           # new block from scratch
 cvdocs generate -f criteria.md                          # ...or read criteria from a file
+cvdocs generate --criteria "<...>" --name <name>        # skip the naming call, use this name
+cvdocs generate --criteria "<...>" --preserve            # lock the produced block on creation
 cvdocs mutate <block-id> --criteria "<how to change it>"  # adapt an existing block
 cvdocs mutate <block-id> -f criteria.md                  # ...or read criteria from a file
+cvdocs mutate <block-id> --criteria "<...>" --name <name>  # skip the naming call, use this name
+cvdocs mutate <block-id> --criteria "<...>" --preserve      # lock the produced block on creation
 
 cvdocs compose "<natural-language request>"            # writes output/results/<name>.md
 cvdocs compose -f request.md                            # ...or read the request from a file
 cvdocs compose "<request>" --use <block-id> --generate "<criteria>"  # pin specific slots
 cvdocs compose "<request>" --dry-run                    # show the plan, write nothing
+cvdocs compose "<request>" --name <name>                # skip the naming call, use this name
+cvdocs compose "<request>" --preserve                    # lock the produced result on creation
 
 cvdocs results list                                    # browse saved compose results
 cvdocs results list --query <text>                     # substring search over name/content
 cvdocs results show <result-id>                        # content + the request/pins/plan behind it
 cvdocs results delete <result-id>                      # permanent — no undo
+cvdocs results preserve <result-id>                    # lock — exempt from `results clear`
+cvdocs results unpreserve <result-id>                  # unlock
+cvdocs results clear                                   # delete every non-preserved result
 ```
 
 `-f`/`--criteria-file` (`generate`/`mutate`) and `-f`/`--request-file` (`compose`) read a
@@ -197,6 +209,13 @@ text. Pass either the inline form or the file, never both.
 Every LLM-taking command accepts `--model provider:model-id` to override the configured
 default for that one call, e.g. `--model openrouter:z-ai/glm-5.3` or
 `--model ollama:qwen3:4b`.
+
+`--name` (`generate`/`mutate`/`compose`) skips that command's naming-model call and uses the
+given name instead; a collision with an existing library/results entry gets `_2`, `_3`, ...
+appended. `--preserve` marks the produced block/result as locked at creation time — a locked
+entry is exempt from `blocks clear`/`results clear`, though `blocks delete`/`results delete`
+can still remove it directly by design (a future frontend is expected to disable its own
+delete button for locked entries instead).
 
 ### HTTP
 
@@ -208,18 +227,21 @@ HTTP, gated by the same `?key=<CVDOCS_API_KEY>` credential as `/auth/google/logi
 
 - `POST /generate/start` / `POST /mutate/start` / `POST /dissect/start` — same inputs as the
   CLI's `generate`/`mutate`/`dissect` commands (JSON body), return `{"job_id": "..."}`
-  immediately rather than blocking until the LLM call finishes. `dissect` additionally rejects
+  immediately rather than blocking until the LLM call finishes. `generate`/`mutate` also accept
+  the CLI's `name` (skip the naming-model call, `_2`/`_3`/... on collision) and `preserve`
+  (lock the produced block on creation) fields. `dissect` additionally rejects
   immediately, before any work starts, if the deployment isn't configured for hosted-mode
   Google connections, or is configured but has no valid stored connection yet — run the
   `/auth/google/login` flow from [3.2](#32-hosted-deployment-docker) first.
 - `POST /compose/start` — same inputs as the CLI's `compose` command, plus a `specifiers` field
   (a shorter free-text field merged into `request` server-side) — accepts `request`,
   `specifiers`, `use_ids`, `generate_criteria`, `count` (`null` lets the model decide), `model`,
-  and `max_generate`; no filesystem output path or dry-run mode over HTTP. Also returns
-  `{"job_id": "..."}` immediately. Unlike the other three tools, a compose run is cancellable —
-  see `POST /cancel/{job_id}` below. Its final outcome includes the finished document's
-  `content`, saved `name`/`result_id`, and the ordered `slots` that produced it (`result_id`/
-  `name`/`content` are `null` if the run was cancelled instead of completing).
+  `name` (skip the naming-model call, `_2`/`_3`/... on collision), `preserve` (lock the produced
+  result on creation), and `max_generate`; no filesystem output path or dry-run mode over HTTP.
+  Also returns `{"job_id": "..."}` immediately. Unlike the other three tools, a compose run is
+  cancellable — see `POST /cancel/{job_id}` below. Its final outcome includes the finished
+  document's `content`, saved `name`/`result_id`, and the ordered `slots` that produced it
+  (`result_id`/`name`/`content` are `null` if the run was cancelled instead of completing).
 - `GET /stream/{job_id}` — a single Server-Sent Events route shared across all four tools,
   streaming that run's progress and ending in one final `event: complete` line with the
   outcome (the produced block's id(s), the composed document, or an error). Reconnecting after
@@ -232,26 +254,37 @@ HTTP, gated by the same `?key=<CVDOCS_API_KEY>` credential as `/auth/google/logi
   cancel-less, each being a single short LLM call chain not worth interrupting mid-flight.
 
 The block library and results history are also reachable over HTTP, gated by the same `key`.
-Unlike the routes above, all seven respond synchronously with the requested data directly — none
-of them return a `job_id` or involve `/stream`:
+Unlike the routes above, all of these respond synchronously with the requested data directly —
+none of them return a `job_id` or involve `/stream`:
 
 - `GET /blocks` — every block in the library, each as a summary (`id`, `name`, `tags`, `schema`,
-  `source`, `created_at`, no `body`); optional `query` (substring over name/body) and repeatable
-  `tag` params, same filtering as `cvdocs blocks list`.
-- `GET /blocks/{id}` — one block's full content, matching `cvdocs blocks show`; `404` if the id
-  doesn't exist.
+  `source`, `created_at`, `preserved`, no `body`); optional `query` (substring over name/body) and
+  repeatable `tag` params, same filtering as `cvdocs blocks list`.
+- `GET /blocks/{id}` — one block's full content plus `preserved`, matching `cvdocs blocks show`;
+  `404` if the id doesn't exist.
 - `PUT /blocks/{id}` — replaces an existing block's `body` in place; `tags`/`schema` are optional
   and left unchanged when omitted. Never creates a new block — `404` if the id doesn't exist,
   `400` if `body` is blank. The block's id, origin, and generation history are never altered by an
   edit.
 - `DELETE /blocks/{id}` — permanently removes a block; `404` if the id doesn't exist. No cascade —
-  any saved result that referenced this block keeps its own copy of what it used.
+  any saved result that referenced this block keeps its own copy of what it used. Works on a
+  preserved block too — HTTP has no lock-enforced delete, unlike a future frontend's disabled
+  button.
+- `POST /blocks/{id}/preserve` / `POST /blocks/{id}/unpreserve` — lock/unlock a block; `404` if
+  the id doesn't exist.
+- `POST /blocks/clear` — deletes every non-preserved block; returns `{"deleted": N,
+  "skipped_preserved": N}`.
 - `GET /results` — every saved compose result, each as a summary (`id`, `name`, `request`,
-  `created_at`, no `content`); optional `query` (substring over name/content), same as `cvdocs
-  results list`.
-- `GET /results/{id}` — one result's full content plus `use_ids`, `generate_criteria`, and
-  `slots`, matching `cvdocs results show`; `404` if the id doesn't exist.
+  `created_at`, `preserved`, no `content`); optional `query` (substring over name/content), same
+  as `cvdocs results list`.
+- `GET /results/{id}` — one result's full content plus `use_ids`, `generate_criteria`, `slots`,
+  and `preserved`, matching `cvdocs results show`; `404` if the id doesn't exist.
 - `DELETE /results/{id}` — permanently removes a saved result; `404` if the id doesn't exist.
+  Works on a preserved result too, same as `DELETE /blocks/{id}`.
+- `POST /results/{id}/preserve` / `POST /results/{id}/unpreserve` — lock/unlock a result; `404`
+  if the id doesn't exist.
+- `POST /results/clear` — deletes every non-preserved result; returns `{"deleted": N,
+  "skipped_preserved": N}`.
 
 ```
 curl -X POST "http://localhost:8000/generate/start?key=<CVDOCS_API_KEY>" \
