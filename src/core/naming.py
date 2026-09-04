@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from typing import Callable, Sequence
 
+from core.errors import InputError
 from llm.client import LLMClient
 
 NAMING_SYSTEM_PROMPT = (
@@ -18,9 +19,23 @@ NAMING_SYSTEM_PROMPT = (
 )
 
 
+def _raw_slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", text.strip().lower()).strip("_")
+
+
 def slugify(text: str) -> str:
-    text = re.sub(r"[^a-z0-9]+", "_", text.strip().lower())
-    return text.strip("_") or "item"
+    return _raw_slug(text) or "item"
+
+
+def validate_explicit_name(name: str) -> str:
+    """Rejects a caller-supplied name with no usable characters left after slugifying —
+    e.g. `"!!!"` or all whitespace — rather than silently falling back to the generic
+    `"item"` placeholder. Returns the raw, unnumbered slug base; numbering happens later,
+    inside a storage backend's guarded save, never here."""
+    raw = _raw_slug(name)
+    if not raw:
+        raise InputError(f"--name {name!r} has no usable characters to build a name from.")
+    return raw
 
 
 def unique_stem(base: str, exists: Callable[[str], bool]) -> str:

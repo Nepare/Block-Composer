@@ -6,6 +6,7 @@ from typer.testing import CliRunner
 
 import cli
 from core.config import Settings
+from core.errors import InputError
 from models.blocks import Block
 from storage.base import Result
 from storage.router import get_block_storage, get_result_storage
@@ -54,6 +55,63 @@ def test_generate_both_inline_and_file_given_fails_clearly(tmp_path, cli_setting
     assert result.exit_code == 1
     assert "--criteria" in result.output
     assert "--criteria-file" in result.output
+
+
+def test_generate_name_is_passed_through(cli_settings, monkeypatch):
+    captured = {}
+
+    def fake_run_generate(criteria, **kwargs):
+        captured["name"] = kwargs.get("name")
+        return SimpleNamespace(), SimpleNamespace(action="save_plain", duplicate_of=None), "result"
+
+    monkeypatch.setattr(cli.generate_module, "run_generate", fake_run_generate)
+
+    result = runner.invoke(cli.app, ["generate", "--criteria", "x", "--name", "widget"])
+
+    assert result.exit_code == 0
+    assert captured["name"] == "widget"
+
+
+def test_mutate_name_is_passed_through(cli_settings, monkeypatch):
+    captured = {}
+
+    def fake_run_mutate(block_id, criteria, **kwargs):
+        captured["name"] = kwargs.get("name")
+        return SimpleNamespace(), "result"
+
+    monkeypatch.setattr(cli.mutate_module, "run_mutate", fake_run_mutate)
+
+    result = runner.invoke(cli.app, ["mutate", "some-id", "--criteria", "x", "--name", "widget"])
+
+    assert result.exit_code == 0
+    assert captured["name"] == "widget"
+
+
+def test_mutate_input_error_fails_clearly(cli_settings, monkeypatch):
+    def fake_run_mutate(block_id, criteria, **kwargs):
+        raise InputError("name and --in-place cannot be combined")
+
+    monkeypatch.setattr(cli.mutate_module, "run_mutate", fake_run_mutate)
+
+    result = runner.invoke(cli.app, ["mutate", "some-id", "--criteria", "x", "--name", "widget", "--in-place"])
+
+    assert result.exit_code == 1
+    assert "in-place" in result.output
+
+
+def test_compose_name_is_passed_through(cli_settings, monkeypatch):
+    captured = {}
+
+    def fake_run_compose(request, **kwargs):
+        captured["name"] = kwargs.get("name")
+        return ComposeOutcome(slots=[], result_path=None, result_id=None, name=None, content=None, cancelled=False)
+
+    monkeypatch.setattr(cli.compose_module, "run_compose", fake_run_compose)
+
+    result = runner.invoke(cli.app, ["compose", "some request", "--name", "widget", "--dry-run"])
+
+    assert result.exit_code == 0
+    assert captured["name"] == "widget"
 
 
 def test_compose_request_file_is_read_and_passed_through(tmp_path, cli_settings, monkeypatch):

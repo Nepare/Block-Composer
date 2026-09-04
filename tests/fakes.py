@@ -53,7 +53,14 @@ class FakeBlockStorage:
             results = [b for b in results if q in b.name.lower() or q in b.body.lower()]
         return results
 
-    def save_with_dedup(self, block, *, naming_client, naming_model, naming_constraints=""):
+    def save_with_dedup(
+        self, block, *, naming_client=None, naming_model=None, naming_constraints="", explicit_base=None
+    ):
+        if explicit_base is not None:
+            stem = naming.unique_stem(explicit_base, self.exists)
+            self.save(block, filename_stem=stem)
+            action = "save_plain" if stem == explicit_base else "save_variant"
+            return naming.NamingDecision(action=action, stem=stem), stem
         base_slug = naming.slugify(block.name)
         existing = [(b.id, b.to_candidate()) for b in self.siblings(base_slug)]
         decision = naming.decide(
@@ -115,7 +122,14 @@ class FakeResultStorage:
             results = [r for r in results if q in r.name.lower() or q in r.content.lower()]
         return results
 
-    def save_with_dedup(self, result, *, naming_client, naming_model, naming_constraints=""):
+    def save_with_dedup(
+        self, result, *, naming_client=None, naming_model=None, naming_constraints="", explicit_base=None
+    ):
+        if explicit_base is not None:
+            stem = naming.unique_stem(explicit_base, self.exists)
+            self.save(result, filename_stem=stem)
+            action = "save_plain" if stem == explicit_base else "save_variant"
+            return naming.NamingDecision(action=action, stem=stem), stem
         base_slug = naming.slugify(result.name)
         existing = [
             (sibling.id, naming.Candidate(name=result.name, full_text=sibling.content))

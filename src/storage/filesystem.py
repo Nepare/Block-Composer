@@ -8,6 +8,7 @@ import frontmatter
 from google.oauth2.credentials import Credentials
 
 from core import naming
+from core.filelock import file_lock
 from models.blocks import Block
 from core.errors import BlockNotFoundError
 from storage.base import Result
@@ -81,26 +82,34 @@ class FilesystemBlockStorage:
         self,
         block: Block,
         *,
-        naming_client,
-        naming_model: str,
+        naming_client=None,
+        naming_model: str | None = None,
         naming_constraints: str = "",
+        explicit_base: str | None = None,
     ) -> tuple[naming.NamingDecision, str | None]:
         """Brand-new name saves immediately; an exact duplicate is skipped; a partial match
-        gets a cheap-model variant name (see naming.decide)."""
-        base_slug = naming.slugify(block.name)
-        existing = [(b.id, b.to_candidate()) for b in self.siblings(base_slug)]
-        decision = naming.decide(
-            block.to_candidate(),
-            existing,
-            exists=self.exists,
-            naming_client=naming_client,
-            naming_model=naming_model,
-            constraints=naming_constraints,
-        )
-        if decision.action == "skip_duplicate":
-            return decision, None
-        stem = self.save(block, filename_stem=decision.stem)
-        return decision, stem
+        gets a cheap-model variant name (see naming.decide). explicit_base bypasses all of
+        that and just numbers on collision. Locked so two processes can't race on naming."""
+        with file_lock(self.root / ".naming.lock"):
+            if explicit_base is not None:
+                stem = naming.unique_stem(explicit_base, self.exists)
+                self.save(block, filename_stem=stem)
+                action = "save_plain" if stem == explicit_base else "save_variant"
+                return naming.NamingDecision(action=action, stem=stem), stem
+            base_slug = naming.slugify(block.name)
+            existing = [(b.id, b.to_candidate()) for b in self.siblings(base_slug)]
+            decision = naming.decide(
+                block.to_candidate(),
+                existing,
+                exists=self.exists,
+                naming_client=naming_client,
+                naming_model=naming_model,
+                constraints=naming_constraints,
+            )
+            if decision.action == "skip_duplicate":
+                return decision, None
+            stem = self.save(block, filename_stem=decision.stem)
+            return decision, stem
 
 
 class FilesystemResultStorage:
@@ -158,30 +167,38 @@ class FilesystemResultStorage:
         self,
         result: Result,
         *,
-        naming_client,
-        naming_model: str,
+        naming_client=None,
+        naming_model: str | None = None,
         naming_constraints: str = "",
+        explicit_base: str | None = None,
     ) -> tuple[naming.NamingDecision, str | None]:
         """Same dedup shape as the Block version, but a result file has no persisted
         title, so every sibling candidate reuses the new result's own `name` and the
-        dedup decision hinges on content equality alone."""
-        base_slug = naming.slugify(result.name)
-        existing = [
-            (sibling.id, naming.Candidate(name=result.name, full_text=sibling.content))
-            for sibling in self.siblings(base_slug)
-        ]
-        decision = naming.decide(
-            result.to_candidate(),
-            existing,
-            exists=self.exists,
-            naming_client=naming_client,
-            naming_model=naming_model,
-            constraints=naming_constraints,
-        )
-        if decision.action == "skip_duplicate":
-            return decision, None
-        stem = self.save(result, filename_stem=decision.stem)
-        return decision, stem
+        dedup decision hinges on content equality alone. explicit_base bypasses all of
+        that and just numbers on collision. Locked so two processes can't race on naming."""
+        with file_lock(self.root / ".naming.lock"):
+            if explicit_base is not None:
+                stem = naming.unique_stem(explicit_base, self.exists)
+                self.save(result, filename_stem=stem)
+                action = "save_plain" if stem == explicit_base else "save_variant"
+                return naming.NamingDecision(action=action, stem=stem), stem
+            base_slug = naming.slugify(result.name)
+            existing = [
+                (sibling.id, naming.Candidate(name=result.name, full_text=sibling.content))
+                for sibling in self.siblings(base_slug)
+            ]
+            decision = naming.decide(
+                result.to_candidate(),
+                existing,
+                exists=self.exists,
+                naming_client=naming_client,
+                naming_model=naming_model,
+                constraints=naming_constraints,
+            )
+            if decision.action == "skip_duplicate":
+                return decision, None
+            stem = self.save(result, filename_stem=decision.stem)
+            return decision, stem
 
 
 class FilesystemCredentialsStorage:

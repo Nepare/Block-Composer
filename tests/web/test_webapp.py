@@ -13,6 +13,7 @@ from tools import mutate as mutate_module
 from web import web_jobs
 from web import webapp
 from auth.web import WebAuthProvider
+from core.naming import NamingDecision
 from models.blocks import Block
 from fakes import FakeLLMClient
 from storage.base import Result
@@ -1324,3 +1325,87 @@ def test_blocks_update_rejects_wrong_key(settings, monkeypatch):
     )
 
     assert response.status_code == 401
+
+
+def test_generate_start_threads_explicit_name_into_run_generate(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+    captured = {}
+
+    def fake_run_generate(*args, **kwargs):
+        captured["kwargs"] = kwargs
+        block = Block(id="widget", body="## Widget\n\nA widget.\n\n**Role:** nobody\n")
+        return block, NamingDecision(action="save_plain", stem="widget"), "widget"
+
+    monkeypatch.setattr(generate_module, "run_generate", fake_run_generate)
+
+    response = client.post(
+        "/generate/start",
+        params={"key": "test-key"},
+        json={"criteria": "a sheriff outpost", "name": "widget"},
+    )
+
+    assert response.status_code == 200
+    job = _wait_for_job(response.json()["job_id"])
+    assert job.status == "done"
+    assert captured["kwargs"]["name"] == "widget"
+
+
+def test_generate_start_rejects_degenerate_name_synchronously(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+    jobs_before = len(web_jobs._jobs)
+
+    response = client.post(
+        "/generate/start",
+        params={"key": "test-key"},
+        json={"criteria": "a sheriff outpost", "name": "!!!"},
+    )
+
+    assert response.status_code == 400
+    assert len(web_jobs._jobs) == jobs_before
+
+
+def test_mutate_start_rejects_name_combined_with_in_place(settings, monkeypatch):
+    FilesystemBlockStorage(settings.blocks_path).save(
+        Block(id="", body="## Police Station\n\nRegular station.\n\n**Rooms:**\n- Office\n"),
+        filename_stem="police_station",
+    )
+    client = _client(settings, monkeypatch)
+    jobs_before = len(web_jobs._jobs)
+
+    response = client.post(
+        "/mutate/start",
+        params={"key": "test-key"},
+        json={"block_id": "police_station", "criteria": "add an armory", "name": "widget", "in_place": True},
+    )
+
+    assert response.status_code == 400
+    assert response.text == "name cannot be combined with in_place."
+    assert len(web_jobs._jobs) == jobs_before
+
+
+def test_compose_start_threads_explicit_name_into_run_compose(settings, monkeypatch):
+    FilesystemBlockStorage(settings.blocks_path).save(
+        Block(id="", body="## School\n\nTeaches children.\n\n**Rooms:**\n- Classroom\n"),
+        filename_stem="school",
+    )
+    client = _client(settings, monkeypatch)
+    captured = {}
+
+    def fake_run_compose(*args, **kwargs):
+        captured["kwargs"] = kwargs
+        return compose_module.ComposeOutcome(
+            slots=[], result_path=None, result_id="result-1", name="My Result", content="content", cancelled=False
+        )
+
+    monkeypatch.setattr(compose_module, "run_compose", fake_run_compose)
+
+    response = client.post(
+        "/compose/start",
+        params={"key": "test-key"},
+        json={"use_ids": ["school"], "name": "My Result"},
+    )
+
+    assert response.status_code == 200
+    job = _wait_for_job(response.json()["job_id"])
+    assert job.status == "done"
+    assert captured["kwargs"]["name"] == "My Result"

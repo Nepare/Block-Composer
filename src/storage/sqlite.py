@@ -163,26 +163,33 @@ class SqliteBlockStorage:
         self,
         block: Block,
         *,
-        naming_client,
-        naming_model: str,
+        naming_client=None,
+        naming_model: str | None = None,
         naming_constraints: str = "",
+        explicit_base: str | None = None,
     ) -> tuple[naming.NamingDecision, str | None]:
-        base_slug = naming.slugify(block.name)
         self._conn.execute("BEGIN IMMEDIATE")
         try:
-            existing = [(b.id, b.to_candidate()) for b in self.siblings(base_slug)]
-            decision = naming.decide(
-                block.to_candidate(),
-                existing,
-                exists=self.exists,
-                naming_client=naming_client,
-                naming_model=naming_model,
-                constraints=naming_constraints,
-            )
-            if decision.action == "skip_duplicate":
-                self._conn.execute("COMMIT")
-                return decision, None
-            self._insert(block, decision.stem)
+            if explicit_base is not None:
+                stem = naming.unique_stem(explicit_base, self.exists)
+                self._insert(block, stem)
+                action = "save_plain" if stem == explicit_base else "save_variant"
+                decision = naming.NamingDecision(action=action, stem=stem)
+            else:
+                base_slug = naming.slugify(block.name)
+                existing = [(b.id, b.to_candidate()) for b in self.siblings(base_slug)]
+                decision = naming.decide(
+                    block.to_candidate(),
+                    existing,
+                    exists=self.exists,
+                    naming_client=naming_client,
+                    naming_model=naming_model,
+                    constraints=naming_constraints,
+                )
+                if decision.action == "skip_duplicate":
+                    self._conn.execute("COMMIT")
+                    return decision, None
+                self._insert(block, decision.stem)
         except Exception:
             self._conn.execute("ROLLBACK")
             raise
@@ -317,31 +324,38 @@ class SqliteResultStorage:
         self,
         result: Result,
         *,
-        naming_client,
-        naming_model: str,
+        naming_client=None,
+        naming_model: str | None = None,
         naming_constraints: str = "",
+        explicit_base: str | None = None,
     ) -> tuple[naming.NamingDecision, str | None]:
         """Same dedup shape as the filesystem backend's Result version — compares by
         content since a Result's name isn't independently recoverable."""
-        base_slug = naming.slugify(result.name)
         self._conn.execute("BEGIN IMMEDIATE")
         try:
-            existing = [
-                (sibling.id, naming.Candidate(name=result.name, full_text=sibling.content))
-                for sibling in self.siblings(base_slug)
-            ]
-            decision = naming.decide(
-                result.to_candidate(),
-                existing,
-                exists=self.exists,
-                naming_client=naming_client,
-                naming_model=naming_model,
-                constraints=naming_constraints,
-            )
-            if decision.action == "skip_duplicate":
-                self._conn.execute("COMMIT")
-                return decision, None
-            self._insert(result, decision.stem)
+            if explicit_base is not None:
+                stem = naming.unique_stem(explicit_base, self.exists)
+                self._insert(result, stem)
+                action = "save_plain" if stem == explicit_base else "save_variant"
+                decision = naming.NamingDecision(action=action, stem=stem)
+            else:
+                base_slug = naming.slugify(result.name)
+                existing = [
+                    (sibling.id, naming.Candidate(name=result.name, full_text=sibling.content))
+                    for sibling in self.siblings(base_slug)
+                ]
+                decision = naming.decide(
+                    result.to_candidate(),
+                    existing,
+                    exists=self.exists,
+                    naming_client=naming_client,
+                    naming_model=naming_model,
+                    constraints=naming_constraints,
+                )
+                if decision.action == "skip_duplicate":
+                    self._conn.execute("COMMIT")
+                    return decision, None
+                self._insert(result, decision.stem)
         except Exception:
             self._conn.execute("ROLLBACK")
             raise

@@ -78,8 +78,15 @@ class BlockStorage(Protocol):
     def search(
         self, query: str | None = None, tags: list[str] | None = None, source: str | None = None
     ) -> list[Block]: ...
+    # naming_client/naming_model are optional (unused when explicit_base skips naming/dedup and lets the backend derive the stem from it via naming.unique_stem inside its own guarded critical section)
     def save_with_dedup(
-        self, block: Block, *, naming_client, naming_model: str, naming_constraints: str = ""
+        self,
+        block: Block,
+        *,
+        naming_client=None,
+        naming_model: str | None = None,
+        naming_constraints: str = "",
+        explicit_base: str | None = None,
     ) -> tuple[NamingDecision, str | None]: ...
     def delete(self, filename_stem: str) -> None: ...
 
@@ -92,8 +99,15 @@ class ResultStorage(Protocol):
     def all(self) -> list[Result]: ...
     def siblings(self, base_slug: str) -> list[Result]: ...
     def search(self, query: str | None = None) -> list[Result]: ...
+    # naming_client/naming_model are optional (unused when explicit_base skips naming/dedup and lets the backend derive the stem from it via naming.unique_stem inside its own guarded critical section)
     def save_with_dedup(
-        self, result: Result, *, naming_client, naming_model: str, naming_constraints: str = ""
+        self,
+        result: Result,
+        *,
+        naming_client=None,
+        naming_model: str | None = None,
+        naming_constraints: str = "",
+        explicit_base: str | None = None,
     ) -> tuple[NamingDecision, str | None]: ...
     def delete(self, filename_stem: str) -> None: ...
 

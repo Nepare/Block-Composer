@@ -1,4 +1,7 @@
+import pytest
+
 from core import naming
+from core.errors import InputError
 from fakes import FakeLLMClient
 
 
@@ -6,6 +9,24 @@ def test_slugify_basic():
     assert naming.slugify("Police Station") == "police_station"
     assert naming.slugify("  W/o Jail!! ") == "w_o_jail"
     assert naming.slugify("") == "item"
+
+
+def test_validate_explicit_name_basic():
+    assert naming.validate_explicit_name("Widget") == "widget"
+
+
+def test_validate_explicit_name_allows_literal_item():
+    assert naming.validate_explicit_name("item") == "item"
+
+
+def test_validate_explicit_name_rejects_no_usable_characters():
+    with pytest.raises(InputError):
+        naming.validate_explicit_name("!!!")
+
+
+def test_validate_explicit_name_rejects_all_whitespace():
+    with pytest.raises(InputError):
+        naming.validate_explicit_name("   ")
 
 
 def test_unique_stem_no_collision():

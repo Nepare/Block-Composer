@@ -109,6 +109,7 @@ def generate(
     schema: str = typer.Option("project_entry", "--schema"),
     style_from: list[str] = typer.Option([], "--style-from"),
     model: Optional[str] = typer.Option(None, "--model"),
+    name: Optional[str] = typer.Option(None, "--name"),
     count: int = typer.Option(1, "--count"),
 ):
     settings = _settings()
@@ -135,6 +136,7 @@ def generate(
                 schema=schema,
                 style_from=style_blocks,
                 model_spec=model,
+                name=name,
                 on_progress=RichConsoleSink(console),
             )
         except CvdocsError as exc:
@@ -155,6 +157,7 @@ def mutate(
     ),
     model: Optional[str] = typer.Option(None, "--model"),
     in_place: bool = typer.Option(False, "--in-place"),
+    name: Optional[str] = typer.Option(None, "--name"),
 ):
     settings = _settings()
     try:
@@ -172,6 +175,7 @@ def mutate(
             settings=settings,
             model_spec=model,
             in_place=in_place,
+            name=name,
             on_progress=RichConsoleSink(console),
         )
     except CvdocsError as exc:
@@ -190,6 +194,7 @@ def compose(
     generate_: list[str] = typer.Option([], "--generate"),
     out: Optional[Path] = typer.Option(None, "--out"),
     model: Optional[str] = typer.Option(None, "--model"),
+    name: Optional[str] = typer.Option(None, "--name"),
     max_generate: int = typer.Option(8, "--max-generate"),
     dry_run: bool = typer.Option(False, "--dry-run"),
     count: Optional[int] = typer.Option(None, "--count", "-n", help="Exact target number of projects in the output."),
@@ -211,6 +216,7 @@ def compose(
             generate_criteria=generate_,
             out_path=out,
             model_spec=model,
+            name=name,
             max_generate=max_generate,
             dry_run=dry_run,
             count=count,

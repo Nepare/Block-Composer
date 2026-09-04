@@ -170,6 +170,28 @@ def test_save_with_dedup_forwards_naming_constraints_to_the_llm(db_path):
     assert "Never use single letters." in system_message
 
 
+def test_save_with_dedup_explicit_base_saves_under_it_with_no_llm_call(db_path):
+    store = SqliteBlockStorage(db_path)
+    decision, stem = store.save_with_dedup(
+        Block(id="", body="## Widget\n\nA.\n"), explicit_base="widget"
+    )
+    assert stem == "widget"
+    assert decision.action == "save_plain"
+    assert store.exists("widget")
+
+
+def test_save_with_dedup_explicit_base_numbers_on_collision(db_path):
+    store = SqliteBlockStorage(db_path)
+    store.save_with_dedup(Block(id="", body="## Widget\n\nA.\n"), explicit_base="widget")
+    decision, stem = store.save_with_dedup(
+        Block(id="", body="## Widget\n\nA.\n"), explicit_base="widget"
+    )
+    # even though content is byte-identical to the first entry, explicit_base must NOT
+    # dedup-skip — it always creates a new, separately numbered entry
+    assert stem == "widget_2"
+    assert decision.action == "save_variant"
+
+
 def test_reopening_the_same_db_file_sees_prior_writes(db_path):
     """A fresh connection to the same file sees an earlier connection's writes."""
     store1 = SqliteBlockStorage(db_path)
@@ -237,6 +259,14 @@ def test_result_save_with_dedup_variant_on_conflicting_content(db_path):
     assert decision.action == "save_variant"
     assert stem == "school_overview_mut_variant"
     assert client.call_count == 1
+
+
+def test_result_save_with_dedup_explicit_base_numbers_on_collision(db_path):
+    store = SqliteResultStorage(db_path)
+    store.save_with_dedup(Result(content="## X\n\nA.\n", name="X"), explicit_base="x")
+    decision, stem = store.save_with_dedup(Result(content="## X\n\nA.\n", name="X"), explicit_base="x")
+    assert stem == "x_2"
+    assert decision.action == "save_variant"
 
 
 def test_result_path_for_is_always_none(db_path):

@@ -8,6 +8,7 @@ from core.config import Settings
 from core.errors import BlockValidationError, OperationCancelled
 from llm.prompts import generate_prompt
 from llm.router import get_client_and_model
+from core import naming
 from core.naming import NamingDecision
 from core.progress import ProgressEvent, ProgressSink
 from storage.base import BlockStorage
@@ -49,11 +50,13 @@ def run_generate(
     schema: str = "project_entry",
     style_from: list[Block] | None = None,
     model_spec: str | None = None,
+    name: str | None = None,
     on_progress: ProgressSink | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> tuple[Block, NamingDecision, str | None]:
     """`on_progress`/`cancel_check` are optional and no-op by default, like compose.run_compose's."""
     progress = on_progress or (lambda _event: None)
+    explicit_base = naming.validate_explicit_name(name) if name is not None else None
     store = get_block_storage(settings)
     client, model = get_client_and_model(model_spec or settings.llm.models.generate, settings, on_progress=progress)
     examples = _pick_style_examples(schema, style_from, store, settings)
@@ -91,13 +94,16 @@ def run_generate(
         generation_criteria=criteria,
     )
     progress(ProgressEvent(kind="naming", message="Checking for duplicates / naming result…"))
-    naming_client, naming_model = get_client_and_model(settings.llm.models.naming, settings, on_progress=progress)
-    naming_constraints = constraints_module.load(settings, "naming")
-    decision, stem = store.save_with_dedup(
-        block,
-        naming_client=naming_client,
-        naming_model=naming_model,
-        naming_constraints=naming_constraints,
-    )
+    if explicit_base is not None:
+        decision, stem = store.save_with_dedup(block, explicit_base=explicit_base)
+    else:
+        naming_client, naming_model = get_client_and_model(settings.llm.models.naming, settings, on_progress=progress)
+        naming_constraints = constraints_module.load(settings, "naming")
+        decision, stem = store.save_with_dedup(
+            block,
+            naming_client=naming_client,
+            naming_model=naming_model,
+            naming_constraints=naming_constraints,
+        )
     progress(ProgressEvent(kind="generate_done", message=f"Generated -> {stem or decision.duplicate_of}"))
     return block, decision, stem

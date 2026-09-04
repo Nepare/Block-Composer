@@ -6,7 +6,7 @@ from tools import compose as compose_module
 from tools import generate as generate_module
 from tools import mutate as mutate_module
 from models.blocks import Block
-from core.errors import BlockNotFoundError, BlockValidationError
+from core.errors import BlockNotFoundError, BlockValidationError, InputError
 from fakes import FakeLLMClient
 from core.progress import ProgressEvent
 from storage.filesystem import FilesystemBlockStorage
@@ -830,3 +830,76 @@ def test_plan_event_carries_structured_step_list_before_execution(settings, fake
     plan_index = next(i for i, e in enumerate(events) if e.kind == "plan")
     first_step_index = next(i for i, e in enumerate(events) if e.kind in ("mutate_start", "generate_start"))
     assert plan_done_index < plan_index < first_step_index
+
+
+def test_explicit_name_bypasses_result_naming_and_preserves_raw_text(settings, fake_router):
+    _seed_library(settings)
+    client = FakeLLMClient()  # no scripted replies -- any chat() call is a test failure
+    fake_router(compose_module, client)
+
+    outcome = compose_module.run_compose(
+        "", settings=settings, use_ids=["school"], name="My Result"
+    )
+
+    assert outcome.result_path.name == "my_result.md"
+    assert outcome.name == "My Result"
+    assert client.call_count == 0  # no result-title-generation call, no naming-tier call either
+
+    from storage.filesystem import FilesystemResultStorage
+
+    saved = FilesystemResultStorage(settings.path.results_dir).load("my_result")
+    assert saved.name == "My Result"  # stored as-is, never slugified
+
+
+def test_explicit_name_collision_gets_numbered_not_deduped(settings, fake_router):
+    _seed_library(settings)
+    client = FakeLLMClient()
+    fake_router(compose_module, client)
+
+    outcome1 = compose_module.run_compose(
+        "", settings=settings, use_ids=["school"], name="My Result"
+    )
+    outcome2 = compose_module.run_compose(
+        "", settings=settings, use_ids=["police_station"], name="My Result"
+    )
+
+    assert outcome1.result_path.name == "my_result.md"
+    # same explicit name -> numbered variant, not a content-based dedup skip, even though
+    # this second run's content differs from the first
+    assert outcome2.result_path.name == "my_result_2.md"
+    assert client.call_count == 0
+
+
+def test_explicit_name_collision_still_numbers_when_content_is_identical(settings, fake_router):
+    _seed_library(settings)
+    client = FakeLLMClient()
+    fake_router(compose_module, client)
+
+    outcome1 = compose_module.run_compose(
+        "", settings=settings, use_ids=["school"], name="My Result"
+    )
+    outcome2 = compose_module.run_compose(
+        "", settings=settings, use_ids=["school"], name="My Result"
+    )
+
+    assert outcome1.result_path.name == "my_result.md"
+    assert outcome2.result_path.name == "my_result_2.md"
+    assert client.call_count == 0
+
+
+def test_invalid_explicit_name_is_rejected_before_any_work(settings, fake_router):
+    _seed_library(settings)
+    client = FakeLLMClient()
+    fake_router(compose_module, client)
+
+    with pytest.raises(InputError):
+        compose_module.run_compose(
+            "need a school",
+            settings=settings,
+            use_ids=["does-not-exist"],
+            generate_criteria=["a sawmill"],
+            name="!!!",
+        )
+    # rejected before even the pinned-use existence check (BlockNotFoundError never raised)
+    # or any generate/mutate/planning/naming LLM call
+    assert client.call_count == 0

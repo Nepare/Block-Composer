@@ -16,6 +16,7 @@ from auth.router import get_auth_provider
 from auth.web import WebAuthProvider
 from core.config import Settings, load_settings
 from core.errors import AuthError, BlockNotFoundError, CvdocsError
+from core.naming import validate_explicit_name
 from models.blocks import Block
 from storage.base import Result
 import os
@@ -83,6 +84,7 @@ class GenerateStartRequest(BaseModel):
     block_schema: str = Field(default="project_entry", alias="schema")
     style_from: list[str] = []
     model: str | None = None
+    name: str | None = None
 
 
 class MutateStartRequest(BaseModel):
@@ -90,6 +92,7 @@ class MutateStartRequest(BaseModel):
     criteria: str
     model: str | None = None
     in_place: bool = False
+    name: str | None = None
 
 
 class DissectStartRequest(BaseModel):
@@ -104,6 +107,7 @@ class ComposeStartRequest(BaseModel):
     count: int | None = None
     model: str | None = None
     max_generate: int | None = None
+    name: str | None = None
 
 
 class BlockUpdateRequest(BaseModel):
@@ -215,6 +219,12 @@ def generate_start(payload: GenerateStartRequest, key: str):
     if not payload.criteria.strip():
         return PlainTextResponse("criteria must not be empty.", status_code=400)
 
+    if payload.name is not None:
+        try:
+            validate_explicit_name(payload.name)
+        except CvdocsError as exc:
+            return PlainTextResponse(str(exc), status_code=400)
+
     store = get_block_storage(settings)
     try:
         style_blocks = [store.load(bid) for bid in payload.style_from] if payload.style_from else None
@@ -228,6 +238,7 @@ def generate_start(payload: GenerateStartRequest, key: str):
             schema=payload.block_schema,
             style_from=style_blocks,
             model_spec=payload.model,
+            name=payload.name,
             on_progress=on_progress,
         )
         if decision.action == "skip_duplicate":
@@ -243,6 +254,15 @@ def mutate_start(payload: MutateStartRequest, key: str):
     settings = load_settings()
     if not _authorized(settings, key):
         return PlainTextResponse("Unauthorized", status_code=401)
+
+    if payload.name is not None and payload.in_place:
+        return PlainTextResponse("name cannot be combined with in_place.", status_code=400)
+
+    if payload.name is not None:
+        try:
+            validate_explicit_name(payload.name)
+        except CvdocsError as exc:
+            return PlainTextResponse(str(exc), status_code=400)
 
     store = get_block_storage(settings)
     try:
@@ -260,6 +280,7 @@ def mutate_start(payload: MutateStartRequest, key: str):
             settings=settings,
             model_spec=payload.model,
             in_place=payload.in_place,
+            name=payload.name,
             on_progress=on_progress,
         )
         return {"block_id": stem}
@@ -335,6 +356,12 @@ def compose_start(payload: ComposeStartRequest, key: str):
     if payload.count is not None and payload.count <= 0:
         return PlainTextResponse(f"count must be a positive integer, got {payload.count}.", status_code=400)
 
+    if payload.name is not None:
+        try:
+            validate_explicit_name(payload.name)
+        except CvdocsError as exc:
+            return PlainTextResponse(str(exc), status_code=400)
+
     def work(on_progress, cancel_event):
         outcome = compose_module.run_compose(
             merged_request,
@@ -344,6 +371,7 @@ def compose_start(payload: ComposeStartRequest, key: str):
             count=payload.count,
             model_spec=payload.model,
             max_generate=payload.max_generate if payload.max_generate is not None else 8,
+            name=payload.name,
             on_progress=on_progress,
             cancel_check=cancel_event.is_set,
         )

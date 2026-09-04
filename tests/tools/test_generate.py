@@ -2,8 +2,8 @@ import pytest
 
 from tools import generate as generate_module
 from models.blocks import Block
-from core.errors import BlockValidationError, OperationCancelled
-from fakes import FakeLLMClient
+from core.errors import BlockValidationError, InputError, OperationCancelled
+from fakes import FakeBlockStorage, FakeLLMClient
 from core.progress import ProgressEvent
 from storage.filesystem import FilesystemBlockStorage
 
@@ -150,3 +150,44 @@ def test_run_generate_includes_constraints_file_in_the_system_prompt(settings, f
 
     system_message = client.calls[0]["messages"][0]["content"]
     assert "Don't invent specific dates." in system_message
+
+
+def test_run_generate_with_explicit_name_saves_under_that_stem_and_skips_naming_llm(
+    settings, fake_router, fake_storage
+):
+    fake_block_store = FakeBlockStorage()
+    fake_storage(generate_module, block_store=fake_block_store)
+    # only one reply scripted: if the naming LLM were consulted (e.g. for a variant
+    # label), the fake would raise from running out of replies -- proving it never fires
+    client = FakeLLMClient(replies=["## Sheriff Outpost\n\nA frontier outpost.\n\n**Role:** nobody\n"])
+    fake_router(generate_module, client)
+
+    block, decision, stem = generate_module.run_generate("a widget", settings=settings, name="Widget")
+
+    assert stem == "widget"
+    assert decision.action == "save_plain"
+    assert fake_block_store.load("widget") is block
+    assert client.call_count == 1
+
+
+def test_run_generate_with_explicit_name_numbers_on_collision(settings, fake_router, fake_storage):
+    fake_block_store = FakeBlockStorage()
+    fake_block_store.save(Block(id="", body="## Widget\n\nExisting.\n"), filename_stem="widget")
+    fake_storage(generate_module, block_store=fake_block_store)
+    client = FakeLLMClient(replies=["## Widget\n\nSomething new.\n\n**Role:** someone\n"])
+    fake_router(generate_module, client)
+
+    _block, decision, stem = generate_module.run_generate("a widget", settings=settings, name="Widget")
+
+    assert stem == "widget_2"
+    assert decision.action == "save_variant"
+
+
+def test_run_generate_with_degenerate_name_raises_before_any_llm_call(settings, fake_router):
+    client = FakeLLMClient(replies=["## Widget\n\nBody.\n\n**Role:** someone\n"])
+    fake_router(generate_module, client)
+
+    with pytest.raises(InputError):
+        generate_module.run_generate("a widget", settings=settings, name="!!!")
+
+    assert client.call_count == 0

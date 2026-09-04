@@ -169,6 +169,29 @@ def test_save_with_dedup_forwards_naming_constraints_to_the_llm(tmp_path):
     assert "Never use single letters." in system_message
 
 
+def test_save_with_dedup_explicit_base_saves_under_it_with_no_llm_call(tmp_path):
+    store = FilesystemBlockStorage(tmp_path)
+    decision, stem = store.save_with_dedup(
+        Block(id="", body="## Widget\n\nA.\n"), explicit_base="widget"
+    )
+    assert stem == "widget"
+    assert decision.action == "save_plain"
+    assert (tmp_path / "widget.md").exists()
+
+
+def test_save_with_dedup_explicit_base_numbers_on_collision(tmp_path):
+    store = FilesystemBlockStorage(tmp_path)
+    store.save_with_dedup(Block(id="", body="## Widget\n\nA.\n"), explicit_base="widget")
+    decision, stem = store.save_with_dedup(
+        Block(id="", body="## Widget\n\nA.\n"), explicit_base="widget"
+    )
+    # even though content is byte-identical to the first entry, explicit_base must NOT
+    # dedup-skip — it always creates a new, separately numbered entry
+    assert stem == "widget_2"
+    assert decision.action == "save_variant"
+    assert len(list(tmp_path.glob("*.md"))) == 2
+
+
 def test_result_save_writes_frontmatter_and_content(tmp_path):
     store = FilesystemResultStorage(tmp_path)
     result = Result(content="## School\n\nTeaches children.\n", name="School Overview", request="need a school")
@@ -268,6 +291,14 @@ def test_result_save_with_dedup_variant_on_conflicting_content(tmp_path):
     assert decision.action == "save_variant"
     assert stem == "school_overview_mut_variant"
     assert client.call_count == 1
+
+
+def test_result_save_with_dedup_explicit_base_numbers_on_collision(tmp_path):
+    store = FilesystemResultStorage(tmp_path)
+    store.save_with_dedup(Result(content="## X\n\nA.\n", name="X"), explicit_base="x")
+    decision, stem = store.save_with_dedup(Result(content="## X\n\nA.\n", name="X"), explicit_base="x")
+    assert stem == "x_2"
+    assert decision.action == "save_variant"
 
 
 def test_save_then_delete_result_removes_it(tmp_path):

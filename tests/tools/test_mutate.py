@@ -2,7 +2,7 @@ import pytest
 
 from tools import mutate as mutate_module
 from models.blocks import Block
-from core.errors import BlockNotFoundError, OperationCancelled
+from core.errors import BlockNotFoundError, InputError, OperationCancelled
 from fakes import FakeLLMClient
 from core.progress import ProgressEvent
 from storage.filesystem import FilesystemBlockStorage
@@ -184,6 +184,60 @@ def test_run_mutate_raises_operation_cancelled_before_the_retry(settings, fake_r
     with pytest.raises(OperationCancelled):
         mutate_module.run_mutate("police_station", "fix", settings=settings, cancel_check=lambda: True)
     assert client.call_count == 1
+
+
+def test_run_mutate_explicit_name_saves_under_that_name_with_no_naming_llm_call(settings, fake_router):
+    _seed(settings)
+    reply = "===BODY===\n## Police Station\n\nSheriff-run now.\n\n**Rooms:**\n- Office\n===LABEL===\nsheriff"
+    client = FakeLLMClient(replies=[reply])
+    fake_router(mutate_module, client)
+
+    block, stem = mutate_module.run_mutate(
+        "police_station", "re-theme", settings=settings, name="explicit-name"
+    )
+
+    assert stem == "explicit_name"
+    assert block.mutated_from == "police_station"
+    assert client.call_count == 1  # only the mutation call -- no naming-tier call at all
+
+
+def test_run_mutate_explicit_name_used_even_when_subject_changes(settings, fake_router):
+    _seed(settings, stem="lumber", body="## Lumber\n\nA lumber camp.\n\n**Rooms:**\n- Saw room\n")
+    reply = (
+        "===BODY===\n## Stone Quarry\n\nA working stone quarry.\n\n**Rooms:**\n- Pit\n"
+        "===LABEL===\nStone Quarry"
+    )
+    client = FakeLLMClient(replies=[reply])
+    fake_router(mutate_module, client)
+
+    block, stem = mutate_module.run_mutate(
+        "lumber", "re-theme as a stone quarry", settings=settings, name="explicit-name"
+    )
+
+    assert stem == "explicit_name"
+    assert client.call_count == 1
+
+
+def test_run_mutate_name_with_in_place_raises_before_the_llm_is_called(settings, fake_router):
+    _seed(settings)
+    client = FakeLLMClient(replies=["should not be used"])
+    fake_router(mutate_module, client)
+
+    with pytest.raises(InputError):
+        mutate_module.run_mutate(
+            "police_station", "update", settings=settings, in_place=True, name="x"
+        )
+    assert client.call_count == 0
+
+
+def test_run_mutate_degenerate_name_raises_before_the_llm_is_called(settings, fake_router):
+    _seed(settings)
+    client = FakeLLMClient(replies=["should not be used"])
+    fake_router(mutate_module, client)
+
+    with pytest.raises(InputError):
+        mutate_module.run_mutate("police_station", "update", settings=settings, name="!!!")
+    assert client.call_count == 0
 
 
 def test_run_mutate_includes_constraints_file_in_the_system_prompt(settings, fake_router, tmp_path):

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Callable
 
 from core import constraints as constraints_module
+from core import naming
 from tools import generate
 from tools import mutate
 from models.blocks import Block
@@ -211,6 +212,7 @@ def run_compose(
     count: int | None = None,
     out_path: Path | None = None,
     model_spec: str | None = None,
+    name: str | None = None,
     max_generate: int = 8,
     dry_run: bool = False,
     on_progress: ProgressSink | None = None,
@@ -218,6 +220,7 @@ def run_compose(
 ) -> ComposeOutcome:
     """`cancel_check`, if given, is polled between slots — a True stops execution before the
     next slot, keeping any blocks/mutations already produced but skipping the final result."""
+    explicit_base = naming.validate_explicit_name(name) if name is not None else None
     progress = on_progress or (lambda _event: None)
     store = get_block_storage(settings)
     use_ids = use_ids or []
@@ -420,6 +423,8 @@ def run_compose(
         use_ids=use_ids,
         generate_criteria=generate_criteria,
         slots=ordered,
+        name=name,
+        explicit_base=explicit_base,
     )
     return ComposeOutcome(
         slots=ordered, result_path=result_path, result_id=result_id, name=name, content=content, cancelled=False
@@ -450,6 +455,8 @@ def _save_result(
     use_ids: list[str],
     generate_criteria: list[str],
     slots: list[ComposeSlot],
+    name: str | None = None,
+    explicit_base: str | None = None,
 ) -> tuple[str | None, str | None, Path | None]:
     """`out_path`, if given, bypasses ResultStorage and writes exactly there instead."""
     if out_path:
@@ -457,7 +464,7 @@ def _save_result(
         out_path.write_text(content, encoding="utf-8")
         return None, None, out_path
 
-    title = _generate_result_name(content, settings, progress)
+    title = name if explicit_base is not None else _generate_result_name(content, settings, progress)
     result_store = get_result_storage(settings)
     result = Result(
         content=content,
@@ -477,13 +484,18 @@ def _save_result(
         ],
     )
 
-    naming_client, naming_model = get_client_and_model(settings.llm.models.naming, settings, on_progress=progress)
-    naming_constraints = constraints_module.load(settings, "naming")
-    decision, stem = result_store.save_with_dedup(
-        result,
-        naming_client=naming_client,
-        naming_model=naming_model,
-        naming_constraints=naming_constraints,
-    )
+    if explicit_base is not None:
+        decision, stem = result_store.save_with_dedup(result, explicit_base=explicit_base)
+    else:
+        naming_client, naming_model = get_client_and_model(
+            settings.llm.models.naming, settings, on_progress=progress
+        )
+        naming_constraints = constraints_module.load(settings, "naming")
+        decision, stem = result_store.save_with_dedup(
+            result,
+            naming_client=naming_client,
+            naming_model=naming_model,
+            naming_constraints=naming_constraints,
+        )
     final_stem = stem or decision.duplicate_of
     return final_stem, title, result_store.path_for(final_stem)

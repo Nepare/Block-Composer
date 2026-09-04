@@ -4,7 +4,7 @@ from core import constraints as constraints_module
 from core import naming
 from models.blocks import Block
 from core.config import Settings
-from core.errors import BlockValidationError, OperationCancelled
+from core.errors import BlockValidationError, InputError, OperationCancelled
 from tools.generate import validate_block_shape
 from llm.prompts import mutate_prompt
 from llm.router import get_client_and_model
@@ -35,11 +35,15 @@ def run_mutate(
     settings: Settings,
     model_spec: str | None = None,
     in_place: bool = False,
+    name: str | None = None,
     on_progress: ProgressSink | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> tuple[Block, str]:
     """`on_progress`/`cancel_check` are optional and no-op by default, like compose.run_compose's."""
     progress = on_progress or (lambda _event: None)
+    if name is not None and in_place:
+        raise InputError("--name cannot be combined with --in-place.")
+    explicit_base = naming.validate_explicit_name(name) if name is not None else None
     store = get_block_storage(settings)
     original = store.load(block_id)
 
@@ -87,11 +91,16 @@ def run_mutate(
         progress(ProgressEvent(kind="mutate_done", message=f"Mutated -> {stem}", block_id=stem))
         return mutated, stem
 
+    if explicit_base is not None:
+        _decision, stem = store.save_with_dedup(mutated, explicit_base=explicit_base)
+        progress(ProgressEvent(kind="mutate_done", message=f"Mutated -> {stem}", block_id=stem))
+        return mutated, stem
+
     if naming.slugify(mutated.name) == naming.slugify(original.name):
         # same subject, just adapted -- the mutate call's own label already names the variant
         base_slug = naming.slugify(original.name)
-        variant_stem = naming.unique_stem(f"{base_slug}_mut_{naming.slugify(label)}", store.exists)
-        stem = store.save(mutated, filename_stem=variant_stem)
+        same_subject_base = f"{base_slug}_mut_{naming.slugify(label)}"
+        _decision, stem = store.save_with_dedup(mutated, explicit_base=same_subject_base)
         progress(ProgressEvent(kind="mutate_done", message=f"Mutated -> {stem}", block_id=stem))
         return mutated, stem
 
