@@ -19,8 +19,7 @@ in `.claude/skills/speckit-*` / `.specify/`, in this order:
 orchestrators themselves and need to do the task by themselves. Don't forget to check completed tasks."
 6. Once a feature's tasks are complete, update `README.md`'s relevant Usage/HTTP/Configuration
    sections if the feature changed CLI flags, HTTP payloads, or setup — this is part of the
-   feature being done, not a follow-up. (011 naming-override and 012 preserve/clear both shipped
-   without this; don't repeat that.)
+   feature being done, not a follow-up.
 
 Past features are the reference examples for tone and structure —
 read one before writing a new spec. **Do not jump straight to editing source files** for
@@ -37,16 +36,10 @@ pluggability, no speculative abstraction, live verification over the real stack,
 core logic, config.yaml as the single source of truth, minimal behavior-only comments). Read it
 once per session rather than re-deriving these rules from the diff each time.
 
-## Codebase traversal (graphify)
+## Codebase traversal
 
-For architecture/relationship questions ("what calls X", "how do these modules connect"),
-check whether `graphify-out/graph.json` exists before doing a broad multi-file Explore/Grep
-sweep — if it does, query it (`/graphify query "<question>"`) instead. The graph has not been
-built yet as of this note: doc/spec files (`README.md`, `specs/*.md`, `enhancements.md`) need
-LLM semantic extraction to index, which costs tokens, so building or rebuilding it is left for
-the user to trigger deliberately (`/graphify` / `/graphify --update`), not run automatically by
-a session. `graphify-out/` is gitignored — see [enhancements.md](enhancements.md)'s
-"Dev Processes Rework" section for why.
+Architecture/relationship questions ("what calls X", "how do these modules connect") are covered
+by the `codebase-traversal` skill — check it before a broad multi-file Explore/Grep sweep.
 
 ## Ask before deciding, not after building
 
@@ -103,10 +96,6 @@ stay at `tests/` root, shared across every category.
 
 ## Design approach
 
-- This file is auto-injected into every session's context on every context reset by the
-  harness — no re-run or manual re-read is needed. A convention violation (e.g. a multi-line
-  docstring) found in a diff is a compliance lapse to self-correct, not evidence this file
-  wasn't read.
 - Don't write expansive comments explaining the change diffs, don't write docstrings with the same purpose. Non-trivial behavior should be explained in 1 comment line at max.
 - Never use concrete examples in comments, README or documentation. Keep the arguments and results abstract if you really need to include them into non-code natural language explanations.
 - When writing files of a similar domain, if those files are related, try placing them in a folder — e.g. storage backends in `storage/`, core tools in `tools/`, dataclasses in `models/`, HTTP exposure in `web/`, cross-cutting utilities in `core/`, `.md` input prompts in `input_prompts/`. Try keeping it the same way.
@@ -115,15 +104,6 @@ stay at `tests/` root, shared across every category.
 
 - `pytest` runs fully offline (mocked LLM calls, `tmp_path`-backed storage — never the repo's
   own `output/` directory).
-- Constitution Principle III (non-negotiable): a feature isn't done when unit tests pass — it
-  needs at least one live run against the real stack it will use, with cleanup of any
-  live-verification artifacts before reporting done.
-- Token conservation for live verification: prefer one batched script/shell invocation over many
-  one-by-one CLI/HTTP tool calls when running through a quickstart scenario. A future shape to
-  build toward (not built yet): a small script, e.g. `scripts/live_verify.py <feature>`, that
-  takes a short list of CLI/HTTP invocations plus their expected checks and runs them all in one
-  process, printing a single consolidated pass/fail report instead of N separate tool
-  round-trips.
-- Once a frontend exists, prefer code/log/network-level checks (curl the API, inspect SSE
-  events, read console/network logs) over iterative screenshot/computer-vision analysis for
-  verification loops — a screenshot is for one final visual sanity check, not the loop itself.
+- Verifying a feature against the real stack before calling it done is covered by the
+  `live-verification` skill (non-negotiable, Constitution Principle III); verifying a frontend
+  change is covered by the `frontend-verification` skill. Neither is repeated here.
