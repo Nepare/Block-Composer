@@ -35,6 +35,7 @@ def run_mutate(
     settings: Settings,
     model_spec: str | None = None,
     in_place: bool = False,
+    preserve: bool = False,
     name: str | None = None,
     on_progress: ProgressSink | None = None,
     cancel_check: Callable[[], bool] | None = None,
@@ -84,6 +85,7 @@ def run_mutate(
         created_by="manual" if in_place else "mutated",
         generation_criteria=criteria,
         mutated_from=None if in_place else original.id,
+        preserved=preserve,
     )
 
     if in_place:

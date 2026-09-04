@@ -11,7 +11,7 @@ from core import naming
 from core.filelock import file_lock
 from models.blocks import Block
 from core.errors import BlockNotFoundError
-from storage.base import Result
+from storage.base import ClearResult, Result
 
 
 class FilesystemBlockStorage:
@@ -46,6 +46,29 @@ class FilesystemBlockStorage:
         if not path.exists():
             raise BlockNotFoundError(f"No block at {path}")
         path.unlink()
+
+    def set_preserved(self, filename_stem: str, preserved: bool) -> None:
+        path = self.path_for(filename_stem)
+        if not path.exists():
+            raise BlockNotFoundError(f"No block at {path}")
+        block = Block.from_post(frontmatter.load(str(path)), default_id=path.stem)
+        block.preserved = preserved
+        frontmatter.dump(block.to_post(), str(path))
+
+    def clear(self) -> ClearResult:
+        deleted = 0
+        skipped = 0
+        for block in self.all():
+            if block.preserved:
+                skipped += 1
+                continue
+            path = self.path_for(block.id)
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+            deleted += 1
+        return ClearResult(deleted=deleted, skipped_preserved=skipped)
 
     def all(self) -> list[Block]:
         return [
@@ -145,6 +168,27 @@ class FilesystemResultStorage:
         if not path.exists():
             raise BlockNotFoundError(f"No result at {path}")
         path.unlink()
+
+    def set_preserved(self, filename_stem: str, preserved: bool) -> None:
+        result = self.load(filename_stem)
+        result.preserved = preserved
+        path = self.path_for(filename_stem)
+        frontmatter.dump(result.to_post(), str(path))
+
+    def clear(self) -> ClearResult:
+        deleted = 0
+        skipped = 0
+        for result in self.all():
+            if result.preserved:
+                skipped += 1
+                continue
+            path = self.path_for(result.id)
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+            deleted += 1
+        return ClearResult(deleted=deleted, skipped_preserved=skipped)
 
     def all(self) -> list[Result]:
         return [self.load(p.stem) for p in sorted(self.root.glob("*.md"))]

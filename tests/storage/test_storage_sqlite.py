@@ -1,3 +1,4 @@
+import sqlite3
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -5,7 +6,7 @@ import pytest
 from models.blocks import Block
 from core.errors import BlockNotFoundError
 from fakes import FakeLLMClient
-from storage.base import Result
+from storage.base import ClearResult, Result
 from storage.sqlite import SqliteBlockStorage, SqlitePendingSignInStore, SqliteResultStorage
 
 
@@ -330,3 +331,219 @@ def test_pending_sign_in_verify_and_consume_is_single_use(db_path):
 
     assert store.verify_and_consume(state) == code_verifier
     assert store.verify_and_consume(state) is None
+
+
+def test_set_preserved_marks_a_fresh_block_preserved(db_path):
+    store = SqliteBlockStorage(db_path)
+    store.save(Block(id="", body="## Lumber\n\nA lumber yard.\n"), filename_stem="lumber")
+
+    store.set_preserved("lumber", True)
+
+    assert store.load("lumber").preserved is True
+
+
+def test_set_preserved_true_twice_is_idempotent(db_path):
+    store = SqliteBlockStorage(db_path)
+    store.save(Block(id="", body="## Lumber\n\nA lumber yard.\n"), filename_stem="lumber")
+
+    store.set_preserved("lumber", True)
+    store.set_preserved("lumber", True)
+
+    assert store.load("lumber").preserved is True
+
+
+def test_set_preserved_false_unpreserves_and_is_idempotent(db_path):
+    store = SqliteBlockStorage(db_path)
+    store.save(Block(id="", body="## Lumber\n\nA lumber yard.\n"), filename_stem="lumber")
+    store.set_preserved("lumber", True)
+
+    store.set_preserved("lumber", False)
+    store.set_preserved("lumber", False)
+
+    assert store.load("lumber").preserved is False
+
+
+def test_set_preserved_on_unknown_block_raises(db_path):
+    store = SqliteBlockStorage(db_path)
+    with pytest.raises(BlockNotFoundError):
+        store.set_preserved("nope", True)
+
+
+def test_clear_deletes_unpreserved_blocks_and_keeps_preserved(db_path):
+    store = SqliteBlockStorage(db_path)
+    store.save(Block(id="", body="## Lumber\n\nA.\n"), filename_stem="lumber")
+    store.save(Block(id="", body="## Police Station\n\nB.\n"), filename_stem="police_station")
+    store.save(Block(id="", body="## School\n\nC.\n"), filename_stem="school")
+    store.set_preserved("school", True)
+
+    result = store.clear()
+
+    assert result == ClearResult(deleted=2, skipped_preserved=1)
+    assert {b.id for b in store.all()} == {"school"}
+
+
+def test_clear_again_on_all_preserved_blocks_deletes_nothing(db_path):
+    store = SqliteBlockStorage(db_path)
+    store.save(Block(id="", body="## School\n\nC.\n"), filename_stem="school")
+    store.set_preserved("school", True)
+
+    result = store.clear()
+
+    assert result == ClearResult(deleted=0, skipped_preserved=1)
+    assert store.exists("school") is True
+
+
+def test_clear_after_unpreserving_last_block_deletes_it(db_path):
+    store = SqliteBlockStorage(db_path)
+    store.save(Block(id="", body="## School\n\nC.\n"), filename_stem="school")
+    store.set_preserved("school", True)
+    store.set_preserved("school", False)
+
+    result = store.clear()
+
+    assert result == ClearResult(deleted=1, skipped_preserved=0)
+    assert store.all() == []
+
+
+def test_clear_on_empty_block_store_is_a_noop(db_path):
+    store = SqliteBlockStorage(db_path)
+    result = store.clear()
+    assert result == ClearResult(deleted=0, skipped_preserved=0)
+
+
+def test_clearing_block_store_does_not_touch_result_store(tmp_path):
+    block_store = SqliteBlockStorage(tmp_path / "blocks.db")
+    result_store = SqliteResultStorage(tmp_path / "results.db")
+    block_store.save(Block(id="", body="## Lumber\n\nA.\n"), filename_stem="lumber")
+    result_store.save(Result(content="## School\n\nB.\n", name="School"), filename_stem="school")
+
+    block_store.clear()
+
+    assert block_store.all() == []
+    assert {r.id for r in result_store.all()} == {"school"}
+
+
+def test_clearing_result_store_does_not_touch_block_store(tmp_path):
+    block_store = SqliteBlockStorage(tmp_path / "blocks.db")
+    result_store = SqliteResultStorage(tmp_path / "results.db")
+    block_store.save(Block(id="", body="## Lumber\n\nA.\n"), filename_stem="lumber")
+    result_store.save(Result(content="## School\n\nB.\n", name="School"), filename_stem="school")
+
+    result_store.clear()
+
+    assert result_store.all() == []
+    assert {b.id for b in block_store.all()} == {"lumber"}
+
+
+def test_set_preserved_marks_a_fresh_result_preserved(db_path):
+    store = SqliteResultStorage(db_path)
+    store.save(Result(content="## School\n\nA.\n", name="School"), filename_stem="school")
+
+    store.set_preserved("school", True)
+
+    assert store.load("school").preserved is True
+
+
+def test_set_preserved_true_twice_on_result_is_idempotent(db_path):
+    store = SqliteResultStorage(db_path)
+    store.save(Result(content="## School\n\nA.\n", name="School"), filename_stem="school")
+
+    store.set_preserved("school", True)
+    store.set_preserved("school", True)
+
+    assert store.load("school").preserved is True
+
+
+def test_set_preserved_false_unpreserves_result_and_is_idempotent(db_path):
+    store = SqliteResultStorage(db_path)
+    store.save(Result(content="## School\n\nA.\n", name="School"), filename_stem="school")
+    store.set_preserved("school", True)
+
+    store.set_preserved("school", False)
+    store.set_preserved("school", False)
+
+    assert store.load("school").preserved is False
+
+
+def test_set_preserved_on_unknown_result_raises(db_path):
+    store = SqliteResultStorage(db_path)
+    with pytest.raises(BlockNotFoundError):
+        store.set_preserved("nope", True)
+
+
+def test_clear_deletes_unpreserved_results_and_keeps_preserved(db_path):
+    store = SqliteResultStorage(db_path)
+    store.save(Result(content="## School\n\nA.\n", name="School"), filename_stem="school")
+    store.save(Result(content="## Lumber\n\nB.\n", name="Lumber"), filename_stem="lumber")
+    store.save(Result(content="## Police\n\nC.\n", name="Police"), filename_stem="police")
+    store.set_preserved("police", True)
+
+    result = store.clear()
+
+    assert result == ClearResult(deleted=2, skipped_preserved=1)
+    assert {r.id for r in store.all()} == {"police"}
+
+
+def test_clear_again_on_all_preserved_results_deletes_nothing(db_path):
+    store = SqliteResultStorage(db_path)
+    store.save(Result(content="## Police\n\nC.\n", name="Police"), filename_stem="police")
+    store.set_preserved("police", True)
+
+    result = store.clear()
+
+    assert result == ClearResult(deleted=0, skipped_preserved=1)
+    assert store.exists("police") is True
+
+
+def test_clear_after_unpreserving_last_result_deletes_it(db_path):
+    store = SqliteResultStorage(db_path)
+    store.save(Result(content="## Police\n\nC.\n", name="Police"), filename_stem="police")
+    store.set_preserved("police", True)
+    store.set_preserved("police", False)
+
+    result = store.clear()
+
+    assert result == ClearResult(deleted=1, skipped_preserved=0)
+    assert store.all() == []
+
+
+def test_clear_on_empty_result_store_is_a_noop(db_path):
+    store = SqliteResultStorage(db_path)
+    result = store.clear()
+    assert result == ClearResult(deleted=0, skipped_preserved=0)
+
+
+def test_sqlite_migration_adds_preserved_column_to_pre_existing_db(db_path):
+    """A database created before this feature (no `preserved` column) must be upgraded
+    in place on next open, keeping any pre-existing rows readable."""
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        """
+        CREATE TABLE blocks (
+            id TEXT PRIMARY KEY,
+            body TEXT NOT NULL,
+            schema TEXT,
+            tags TEXT NOT NULL DEFAULT '[]',
+            source TEXT NOT NULL DEFAULT 'manual',
+            created_by TEXT NOT NULL DEFAULT 'manual',
+            created_at TEXT,
+            generation_criteria TEXT,
+            mutated_from TEXT
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO blocks (id, body, schema, tags, source, created_by, created_at, "
+        "generation_criteria, mutated_from) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ("lumber", "## Lumber\n\nA lumber yard.\n", None, "[]", "manual", "manual", None, None, None),
+    )
+    conn.commit()
+    conn.close()
+
+    store = SqliteBlockStorage(db_path)
+
+    cols = [row["name"] for row in store._conn.execute("PRAGMA table_info(blocks)").fetchall()]
+    assert "preserved" in cols
+    loaded = store.load("lumber")
+    assert loaded.preserved is False
+    assert "A lumber yard." in loaded.body

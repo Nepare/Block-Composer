@@ -18,6 +18,7 @@ class Block:
     created_at: datetime | None = None
     generation_criteria: str | None = None
     mutated_from: str | None = None
+    preserved: bool = False
 
     @property
     def name(self) -> str:
@@ -43,6 +44,7 @@ class Block:
             "source": self.source,
             "created_by": self.created_by,
             "created_at": (self.created_at or datetime.now(timezone.utc)).isoformat(),
+            "preserved": self.preserved,
         }
         if self.schema:
             meta["schema"] = self.schema
@@ -74,4 +76,5 @@ class Block:
             created_at=created_at,
             generation_criteria=meta.get("generation_criteria"),
             mutated_from=meta.get("mutated_from"),
+            preserved=bool(meta.get("preserved", False)),
         )

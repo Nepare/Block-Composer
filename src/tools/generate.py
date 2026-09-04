@@ -51,6 +51,7 @@ def run_generate(
     style_from: list[Block] | None = None,
     model_spec: str | None = None,
     name: str | None = None,
+    preserve: bool = False,
     on_progress: ProgressSink | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> tuple[Block, NamingDecision, str | None]:
@@ -92,6 +93,7 @@ def run_generate(
         source="generated",
         created_by="generated",
         generation_criteria=criteria,
+        preserved=preserve,
     )
     progress(ProgressEvent(kind="naming", message="Checking for duplicates / naming result…"))
     if explicit_base is not None:

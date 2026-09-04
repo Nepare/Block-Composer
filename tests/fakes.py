@@ -1,5 +1,6 @@
 from core import naming
 from core.errors import BlockNotFoundError
+from storage.base import ClearResult
 
 
 class FakeBlockStorage:
@@ -30,6 +31,18 @@ class FakeBlockStorage:
         if filename_stem not in self._blocks:
             raise BlockNotFoundError(f"No block {filename_stem!r}")
         del self._blocks[filename_stem]
+
+    def set_preserved(self, filename_stem, preserved: bool) -> None:
+        if filename_stem not in self._blocks:
+            raise BlockNotFoundError(f"No block {filename_stem!r}")
+        self._blocks[filename_stem].preserved = preserved
+
+    def clear(self) -> ClearResult:
+        to_delete = [stem for stem, b in self._blocks.items() if not b.preserved]
+        for stem in to_delete:
+            del self._blocks[stem]
+        skipped = len(self._blocks)
+        return ClearResult(deleted=len(to_delete), skipped_preserved=skipped)
 
     def all(self) -> list:
         return list(self._blocks.values())
@@ -104,6 +117,18 @@ class FakeResultStorage:
         if filename_stem not in self._results:
             raise BlockNotFoundError(f"No result {filename_stem!r}")
         del self._results[filename_stem]
+
+    def set_preserved(self, filename_stem, preserved: bool) -> None:
+        if filename_stem not in self._results:
+            raise BlockNotFoundError(f"No result {filename_stem!r}")
+        self._results[filename_stem].preserved = preserved
+
+    def clear(self) -> ClearResult:
+        to_delete = [stem for stem, r in self._results.items() if not r.preserved]
+        for stem in to_delete:
+            del self._results[stem]
+        skipped = len(self._results)
+        return ClearResult(deleted=len(to_delete), skipped_preserved=skipped)
 
     def all(self) -> list:
         return list(self._results.values())

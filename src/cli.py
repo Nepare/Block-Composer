@@ -111,6 +111,7 @@ def generate(
     model: Optional[str] = typer.Option(None, "--model"),
     name: Optional[str] = typer.Option(None, "--name"),
     count: int = typer.Option(1, "--count"),
+    preserve: bool = typer.Option(False, "--preserve"),
 ):
     settings = _settings()
     try:
@@ -137,6 +138,7 @@ def generate(
                 style_from=style_blocks,
                 model_spec=model,
                 name=name,
+                preserve=preserve,
                 on_progress=RichConsoleSink(console),
             )
         except CvdocsError as exc:
@@ -158,6 +160,7 @@ def mutate(
     model: Optional[str] = typer.Option(None, "--model"),
     in_place: bool = typer.Option(False, "--in-place"),
     name: Optional[str] = typer.Option(None, "--name"),
+    preserve: bool = typer.Option(False, "--preserve"),
 ):
     settings = _settings()
     try:
@@ -176,6 +179,7 @@ def mutate(
             model_spec=model,
             in_place=in_place,
             name=name,
+            preserve=preserve,
             on_progress=RichConsoleSink(console),
         )
     except CvdocsError as exc:
@@ -198,6 +202,7 @@ def compose(
     max_generate: int = typer.Option(8, "--max-generate"),
     dry_run: bool = typer.Option(False, "--dry-run"),
     count: Optional[int] = typer.Option(None, "--count", "-n", help="Exact target number of projects in the output."),
+    preserve: bool = typer.Option(False, "--preserve"),
 ):
     settings = _settings()
     try:
@@ -220,6 +225,7 @@ def compose(
             max_generate=max_generate,
             dry_run=dry_run,
             count=count,
+            preserve=preserve,
             on_progress=RichConsoleSink(console),
         )
     except CvdocsError as exc:
@@ -271,6 +277,7 @@ def blocks_show(block_id: str = typer.Argument(...)):
         _print_error(exc)
         raise typer.Exit(1)
     console.print(escape(block.body))
+    console.print(f"[bold]Preserved:[/bold] {block.preserved}")
 
 
 @blocks_app.command("delete")
@@ -283,6 +290,40 @@ def blocks_delete(block_id: str = typer.Argument(...)):
         _print_error(exc)
         raise typer.Exit(1)
     console.print(f"[green]Deleted[/green] {escape(block_id)}")
+
+
+@blocks_app.command("preserve")
+def blocks_preserve(block_id: str = typer.Argument(...)):
+    settings = _settings()
+    store = get_block_storage(settings)
+    try:
+        store.set_preserved(block_id, True)
+    except CvdocsError as exc:
+        _print_error(exc)
+        raise typer.Exit(1)
+    console.print(f"[green]Preserved[/green] {escape(block_id)}")
+
+
+@blocks_app.command("unpreserve")
+def blocks_unpreserve(block_id: str = typer.Argument(...)):
+    settings = _settings()
+    store = get_block_storage(settings)
+    try:
+        store.set_preserved(block_id, False)
+    except CvdocsError as exc:
+        _print_error(exc)
+        raise typer.Exit(1)
+    console.print(f"[green]Unpreserved[/green] {escape(block_id)}")
+
+
+@blocks_app.command("clear")
+def blocks_clear():
+    settings = _settings()
+    store = get_block_storage(settings)
+    result = store.clear()
+    console.print(
+        f"[green]Cleared[/green] deleted={result.deleted} skipped_preserved={result.skipped_preserved}"
+    )
 
 
 @results_app.command("list")
@@ -313,6 +354,7 @@ def results_show(result_id: str = typer.Argument(...)):
     console.print(f"[bold]Use ids:[/bold] {escape(', '.join(result.use_ids) or '(none)')}")
     console.print(f"[bold]Generate criteria:[/bold] {escape(', '.join(result.generate_criteria) or '(none)')}")
     console.print(f"[bold]Slots:[/bold] {escape(str(result.slots)) if result.slots else '(none)'}")
+    console.print(f"[bold]Preserved:[/bold] {result.preserved}")
 
 
 @results_app.command("delete")
@@ -325,6 +367,40 @@ def results_delete(result_id: str = typer.Argument(...)):
         _print_error(exc)
         raise typer.Exit(1)
     console.print(f"[green]Deleted[/green] {escape(result_id)}")
+
+
+@results_app.command("preserve")
+def results_preserve(result_id: str = typer.Argument(...)):
+    settings = _settings()
+    store = get_result_storage(settings)
+    try:
+        store.set_preserved(result_id, True)
+    except CvdocsError as exc:
+        _print_error(exc)
+        raise typer.Exit(1)
+    console.print(f"[green]Preserved[/green] {escape(result_id)}")
+
+
+@results_app.command("unpreserve")
+def results_unpreserve(result_id: str = typer.Argument(...)):
+    settings = _settings()
+    store = get_result_storage(settings)
+    try:
+        store.set_preserved(result_id, False)
+    except CvdocsError as exc:
+        _print_error(exc)
+        raise typer.Exit(1)
+    console.print(f"[green]Unpreserved[/green] {escape(result_id)}")
+
+
+@results_app.command("clear")
+def results_clear():
+    settings = _settings()
+    store = get_result_storage(settings)
+    result = store.clear()
+    console.print(
+        f"[green]Cleared[/green] deleted={result.deleted} skipped_preserved={result.skipped_preserved}"
+    )
 
 
 if __name__ == "__main__":

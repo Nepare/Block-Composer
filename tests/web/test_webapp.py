@@ -1221,6 +1221,326 @@ def test_results_delete_rejects_wrong_key(settings, monkeypatch):
     assert response.status_code == 401
 
 
+def test_blocks_preserve_marks_block_preserved(settings, monkeypatch):
+    store = FilesystemBlockStorage(settings.blocks_path)
+    store.save(Block(id="", body="## Sheriff Outpost\n\nA frontier outpost.\n"), filename_stem="sheriff_outpost")
+    client = _client(settings, monkeypatch)
+
+    response = client.post("/blocks/sheriff_outpost/preserve", params={"key": "test-key"})
+
+    assert response.status_code == 200
+    assert response.json() == {"preserved": "sheriff_outpost"}
+    fetched = client.get("/blocks/sheriff_outpost", params={"key": "test-key"})
+    assert fetched.json()["preserved"] is True
+
+
+def test_blocks_preserve_is_idempotent(settings, monkeypatch):
+    store = FilesystemBlockStorage(settings.blocks_path)
+    store.save(Block(id="", body="## Sheriff Outpost\n\nA frontier outpost.\n"), filename_stem="sheriff_outpost")
+    client = _client(settings, monkeypatch)
+
+    first = client.post("/blocks/sheriff_outpost/preserve", params={"key": "test-key"})
+    second = client.post("/blocks/sheriff_outpost/preserve", params={"key": "test-key"})
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+
+def test_blocks_unpreserve_marks_block_not_preserved(settings, monkeypatch):
+    store = FilesystemBlockStorage(settings.blocks_path)
+    store.save(Block(id="", body="## Sheriff Outpost\n\nA frontier outpost.\n"), filename_stem="sheriff_outpost")
+    client = _client(settings, monkeypatch)
+
+    client.post("/blocks/sheriff_outpost/preserve", params={"key": "test-key"})
+    response = client.post("/blocks/sheriff_outpost/unpreserve", params={"key": "test-key"})
+
+    assert response.status_code == 200
+    assert response.json() == {"preserved": False}
+    fetched = client.get("/blocks/sheriff_outpost", params={"key": "test-key"})
+    assert fetched.json()["preserved"] is False
+
+
+def test_blocks_unpreserve_is_idempotent(settings, monkeypatch):
+    store = FilesystemBlockStorage(settings.blocks_path)
+    store.save(Block(id="", body="## Sheriff Outpost\n\nA frontier outpost.\n"), filename_stem="sheriff_outpost")
+    client = _client(settings, monkeypatch)
+
+    response = client.post("/blocks/sheriff_outpost/unpreserve", params={"key": "test-key"})
+
+    assert response.status_code == 200
+
+
+def test_blocks_preserve_rejects_unknown_id(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+
+    response = client.post("/blocks/does-not-exist/preserve", params={"key": "test-key"})
+
+    assert response.status_code == 404
+
+
+def test_blocks_preserve_rejects_missing_key(settings, monkeypatch):
+    store = FilesystemBlockStorage(settings.blocks_path)
+    store.save(Block(id="", body="## Sheriff Outpost\n\nA frontier outpost.\n"), filename_stem="sheriff_outpost")
+    client = _client(settings, monkeypatch)
+
+    response = client.post("/blocks/sheriff_outpost/preserve")
+
+    assert response.status_code == 422
+
+
+def test_blocks_preserve_rejects_wrong_key(settings, monkeypatch):
+    store = FilesystemBlockStorage(settings.blocks_path)
+    store.save(Block(id="", body="## Sheriff Outpost\n\nA frontier outpost.\n"), filename_stem="sheriff_outpost")
+    client = _client(settings, monkeypatch)
+
+    response = client.post("/blocks/sheriff_outpost/preserve", params={"key": "wrong-key"})
+
+    assert response.status_code == 401
+
+
+def test_blocks_list_and_get_include_preserved_field(settings, monkeypatch):
+    store = FilesystemBlockStorage(settings.blocks_path)
+    store.save(Block(id="", body="## Sheriff Outpost\n\nA frontier outpost.\n"), filename_stem="sheriff_outpost")
+    store.save(Block(id="", body="## Police Station\n\nRegular station.\n"), filename_stem="police_station")
+    client = _client(settings, monkeypatch)
+
+    client.post("/blocks/sheriff_outpost/preserve", params={"key": "test-key"})
+
+    listed = client.get("/blocks", params={"key": "test-key"}).json()
+    by_id = {b["id"]: b for b in listed}
+    assert by_id["sheriff_outpost"]["preserved"] is True
+    assert by_id["police_station"]["preserved"] is False
+
+    fetched_preserved = client.get("/blocks/sheriff_outpost", params={"key": "test-key"})
+    fetched_unpreserved = client.get("/blocks/police_station", params={"key": "test-key"})
+    assert fetched_preserved.json()["preserved"] is True
+    assert fetched_unpreserved.json()["preserved"] is False
+
+
+def test_results_preserve_marks_result_preserved(settings, monkeypatch):
+    store = FilesystemResultStorage(settings.results_path)
+    store.save(Result(id="", content="A quiet outpost.", name="Quiet Outpost"), filename_stem="quiet_outpost")
+    client = _client(settings, monkeypatch)
+
+    response = client.post("/results/quiet_outpost/preserve", params={"key": "test-key"})
+
+    assert response.status_code == 200
+    assert response.json() == {"preserved": "quiet_outpost"}
+    fetched = client.get("/results/quiet_outpost", params={"key": "test-key"})
+    assert fetched.json()["preserved"] is True
+
+
+def test_results_preserve_is_idempotent(settings, monkeypatch):
+    store = FilesystemResultStorage(settings.results_path)
+    store.save(Result(id="", content="A quiet outpost.", name="Quiet Outpost"), filename_stem="quiet_outpost")
+    client = _client(settings, monkeypatch)
+
+    first = client.post("/results/quiet_outpost/preserve", params={"key": "test-key"})
+    second = client.post("/results/quiet_outpost/preserve", params={"key": "test-key"})
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+
+def test_results_unpreserve_marks_result_not_preserved(settings, monkeypatch):
+    store = FilesystemResultStorage(settings.results_path)
+    store.save(Result(id="", content="A quiet outpost.", name="Quiet Outpost"), filename_stem="quiet_outpost")
+    client = _client(settings, monkeypatch)
+
+    client.post("/results/quiet_outpost/preserve", params={"key": "test-key"})
+    response = client.post("/results/quiet_outpost/unpreserve", params={"key": "test-key"})
+
+    assert response.status_code == 200
+    assert response.json() == {"preserved": False}
+    fetched = client.get("/results/quiet_outpost", params={"key": "test-key"})
+    assert fetched.json()["preserved"] is False
+
+
+def test_results_unpreserve_is_idempotent(settings, monkeypatch):
+    store = FilesystemResultStorage(settings.results_path)
+    store.save(Result(id="", content="A quiet outpost.", name="Quiet Outpost"), filename_stem="quiet_outpost")
+    client = _client(settings, monkeypatch)
+
+    response = client.post("/results/quiet_outpost/unpreserve", params={"key": "test-key"})
+
+    assert response.status_code == 200
+
+
+def test_results_preserve_rejects_unknown_id(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+
+    response = client.post("/results/does-not-exist/preserve", params={"key": "test-key"})
+
+    assert response.status_code == 404
+
+
+def test_results_preserve_rejects_missing_key(settings, monkeypatch):
+    store = FilesystemResultStorage(settings.results_path)
+    store.save(Result(id="", content="A quiet outpost.", name="Quiet Outpost"), filename_stem="quiet_outpost")
+    client = _client(settings, monkeypatch)
+
+    response = client.post("/results/quiet_outpost/preserve")
+
+    assert response.status_code == 422
+
+
+def test_results_preserve_rejects_wrong_key(settings, monkeypatch):
+    store = FilesystemResultStorage(settings.results_path)
+    store.save(Result(id="", content="A quiet outpost.", name="Quiet Outpost"), filename_stem="quiet_outpost")
+    client = _client(settings, monkeypatch)
+
+    response = client.post("/results/quiet_outpost/preserve", params={"key": "wrong-key"})
+
+    assert response.status_code == 401
+
+
+def test_results_list_and_get_include_preserved_field(settings, monkeypatch):
+    store = FilesystemResultStorage(settings.results_path)
+    store.save(Result(id="", content="A quiet outpost.", name="Quiet Outpost"), filename_stem="quiet_outpost")
+    store.save(Result(id="", content="A logging town.", name="Sawmill Town"), filename_stem="sawmill_town")
+    client = _client(settings, monkeypatch)
+
+    client.post("/results/quiet_outpost/preserve", params={"key": "test-key"})
+
+    listed = client.get("/results", params={"key": "test-key"}).json()
+    by_id = {r["id"]: r for r in listed}
+    assert by_id["quiet_outpost"]["preserved"] is True
+    assert by_id["sawmill_town"]["preserved"] is False
+
+    fetched_preserved = client.get("/results/quiet_outpost", params={"key": "test-key"})
+    fetched_unpreserved = client.get("/results/sawmill_town", params={"key": "test-key"})
+    assert fetched_preserved.json()["preserved"] is True
+    assert fetched_unpreserved.json()["preserved"] is False
+
+
+def test_blocks_clear_removes_unpreserved_keeps_preserved(settings, monkeypatch):
+    store = FilesystemBlockStorage(settings.blocks_path)
+    store.save(Block(id="", body="## Sheriff Outpost\n\nA frontier outpost.\n"), filename_stem="sheriff_outpost")
+    store.save(Block(id="", body="## Police Station\n\nRegular station.\n"), filename_stem="police_station")
+    store.save(Block(id="", body="## School\n\nTeaches children.\n"), filename_stem="school")
+    client = _client(settings, monkeypatch)
+    client.post("/blocks/school/preserve", params={"key": "test-key"})
+
+    response = client.post("/blocks/clear", params={"key": "test-key"})
+
+    assert response.status_code == 200
+    assert response.json() == {"deleted": 2, "skipped_preserved": 1}
+    remaining = client.get("/blocks", params={"key": "test-key"}).json()
+    assert [b["id"] for b in remaining] == ["school"]
+
+
+def test_blocks_clear_on_empty_library_reports_zero(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+
+    response = client.post("/blocks/clear", params={"key": "test-key"})
+
+    assert response.status_code == 200
+    assert response.json() == {"deleted": 0, "skipped_preserved": 0}
+
+
+def test_blocks_clear_all_preserved_deletes_nothing(settings, monkeypatch):
+    store = FilesystemBlockStorage(settings.blocks_path)
+    store.save(Block(id="", body="## Sheriff Outpost\n\nA frontier outpost.\n"), filename_stem="sheriff_outpost")
+    store.save(Block(id="", body="## Police Station\n\nRegular station.\n"), filename_stem="police_station")
+    client = _client(settings, monkeypatch)
+    client.post("/blocks/sheriff_outpost/preserve", params={"key": "test-key"})
+    client.post("/blocks/police_station/preserve", params={"key": "test-key"})
+
+    response = client.post("/blocks/clear", params={"key": "test-key"})
+
+    assert response.status_code == 200
+    assert response.json() == {"deleted": 0, "skipped_preserved": 2}
+    assert client.get("/blocks/sheriff_outpost", params={"key": "test-key"}).status_code == 200
+    assert client.get("/blocks/police_station", params={"key": "test-key"}).status_code == 200
+
+
+def test_blocks_clear_does_not_affect_results(settings, monkeypatch):
+    FilesystemBlockStorage(settings.blocks_path).save(
+        Block(id="", body="## Sheriff Outpost\n\nA frontier outpost.\n"), filename_stem="sheriff_outpost"
+    )
+    FilesystemResultStorage(settings.results_path).save(
+        Result(id="", content="A quiet outpost.", name="Quiet Outpost"), filename_stem="quiet_outpost"
+    )
+    client = _client(settings, monkeypatch)
+
+    client.post("/blocks/clear", params={"key": "test-key"})
+
+    still_there = client.get("/results/quiet_outpost", params={"key": "test-key"})
+    assert still_there.status_code == 200
+
+
+def test_blocks_clear_rejects_wrong_key(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+
+    response = client.post("/blocks/clear", params={"key": "wrong-key"})
+
+    assert response.status_code == 401
+
+
+def test_results_clear_removes_unpreserved_keeps_preserved(settings, monkeypatch):
+    store = FilesystemResultStorage(settings.results_path)
+    store.save(Result(id="", content="A quiet outpost.", name="Quiet Outpost"), filename_stem="quiet_outpost")
+    store.save(Result(id="", content="A logging town.", name="Sawmill Town"), filename_stem="sawmill_town")
+    store.save(Result(id="", content="A small farm.", name="Small Farm"), filename_stem="small_farm")
+    client = _client(settings, monkeypatch)
+    client.post("/results/small_farm/preserve", params={"key": "test-key"})
+
+    response = client.post("/results/clear", params={"key": "test-key"})
+
+    assert response.status_code == 200
+    assert response.json() == {"deleted": 2, "skipped_preserved": 1}
+    remaining = client.get("/results", params={"key": "test-key"}).json()
+    assert [r["id"] for r in remaining] == ["small_farm"]
+
+
+def test_results_clear_on_empty_library_reports_zero(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+
+    response = client.post("/results/clear", params={"key": "test-key"})
+
+    assert response.status_code == 200
+    assert response.json() == {"deleted": 0, "skipped_preserved": 0}
+
+
+def test_results_clear_all_preserved_deletes_nothing(settings, monkeypatch):
+    store = FilesystemResultStorage(settings.results_path)
+    store.save(Result(id="", content="A quiet outpost.", name="Quiet Outpost"), filename_stem="quiet_outpost")
+    store.save(Result(id="", content="A logging town.", name="Sawmill Town"), filename_stem="sawmill_town")
+    client = _client(settings, monkeypatch)
+    client.post("/results/quiet_outpost/preserve", params={"key": "test-key"})
+    client.post("/results/sawmill_town/preserve", params={"key": "test-key"})
+
+    response = client.post("/results/clear", params={"key": "test-key"})
+
+    assert response.status_code == 200
+    assert response.json() == {"deleted": 0, "skipped_preserved": 2}
+    assert client.get("/results/quiet_outpost", params={"key": "test-key"}).status_code == 200
+    assert client.get("/results/sawmill_town", params={"key": "test-key"}).status_code == 200
+
+
+def test_results_clear_does_not_affect_blocks(settings, monkeypatch):
+    FilesystemBlockStorage(settings.blocks_path).save(
+        Block(id="", body="## Sheriff Outpost\n\nA frontier outpost.\n"), filename_stem="sheriff_outpost"
+    )
+    FilesystemResultStorage(settings.results_path).save(
+        Result(id="", content="A quiet outpost.", name="Quiet Outpost"), filename_stem="quiet_outpost"
+    )
+    client = _client(settings, monkeypatch)
+
+    client.post("/results/clear", params={"key": "test-key"})
+
+    still_there = client.get("/blocks/sheriff_outpost", params={"key": "test-key"})
+    assert still_there.status_code == 200
+
+
+def test_results_clear_rejects_wrong_key(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+
+    response = client.post("/results/clear", params={"key": "wrong-key"})
+
+    assert response.status_code == 401
+
+
 def test_blocks_update_replaces_content(settings, monkeypatch):
     store = FilesystemBlockStorage(settings.blocks_path)
     store.save(
@@ -1409,3 +1729,71 @@ def test_compose_start_threads_explicit_name_into_run_compose(settings, monkeypa
     job = _wait_for_job(response.json()["job_id"])
     assert job.status == "done"
     assert captured["kwargs"]["name"] == "My Result"
+
+
+def test_generate_start_with_preserve_true_saves_preserved_block(settings, monkeypatch, fake_router):
+    client = _client(settings, monkeypatch)
+    llm = FakeLLMClient(replies=["## Sheriff Outpost\n\nA frontier outpost.\n\n**Role:** nobody\n"])
+    fake_router(generate_module, llm)
+
+    response = client.post(
+        "/generate/start",
+        params={"key": "test-key"},
+        json={"criteria": "a sheriff outpost", "preserve": True},
+    )
+
+    assert response.status_code == 200
+    job = _wait_for_job(response.json()["job_id"])
+    assert job.status == "done"
+    block_id = job.outcome["block_id"]
+    fetched = client.get(f"/blocks/{block_id}", params={"key": "test-key"})
+    assert fetched.json()["preserved"] is True
+
+
+def test_mutate_start_with_preserve_true_saves_preserved_block(settings, monkeypatch, fake_router):
+    FilesystemBlockStorage(settings.blocks_path).save(
+        Block(id="", body="## Police Station\n\nRegular station.\n\n**Rooms:**\n- Office\n"),
+        filename_stem="police_station",
+    )
+    client = _client(settings, monkeypatch)
+    llm = FakeLLMClient(
+        replies=[
+            "===BODY===\n## Police Station\n\nRenovated station.\n\n**Rooms:**\n- Office\n"
+            "- Armory\n===LABEL===\nrenovated\n"
+        ]
+    )
+    fake_router(mutate_module, llm)
+
+    response = client.post(
+        "/mutate/start",
+        params={"key": "test-key"},
+        json={"block_id": "police_station", "criteria": "add an armory", "preserve": True},
+    )
+
+    assert response.status_code == 200
+    job = _wait_for_job(response.json()["job_id"])
+    assert job.status == "done"
+    block_id = job.outcome["block_id"]
+    fetched = client.get(f"/blocks/{block_id}", params={"key": "test-key"})
+    assert fetched.json()["preserved"] is True
+
+
+def test_compose_start_with_preserve_true_saves_preserved_result(settings, monkeypatch):
+    FilesystemBlockStorage(settings.blocks_path).save(
+        Block(id="", body="## School\n\nTeaches children.\n\n**Rooms:**\n- Classroom\n"),
+        filename_stem="school",
+    )
+    client = _client(settings, monkeypatch)
+
+    response = client.post(
+        "/compose/start",
+        params={"key": "test-key"},
+        json={"use_ids": ["school"], "name": "My Result", "preserve": True},
+    )
+
+    assert response.status_code == 200
+    job = _wait_for_job(response.json()["job_id"])
+    assert job.status == "done"
+    result_id = job.outcome["result_id"]
+    fetched = client.get(f"/results/{result_id}", params={"key": "test-key"})
+    assert fetched.json()["preserved"] is True

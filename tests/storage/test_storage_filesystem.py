@@ -1,10 +1,12 @@
+from pathlib import Path
+
 import frontmatter
 import pytest
 
 from models.blocks import Block
 from core.errors import BlockNotFoundError
 from fakes import FakeLLMClient
-from storage.base import Result
+from storage.base import ClearResult, Result
 from storage.filesystem import FilesystemBlockStorage, FilesystemResultStorage
 
 
@@ -316,3 +318,226 @@ def test_delete_missing_result_raises(tmp_path):
     store = FilesystemResultStorage(tmp_path)
     with pytest.raises(BlockNotFoundError):
         store.delete("nope")
+
+
+def test_set_preserved_marks_a_fresh_block_preserved(tmp_path):
+    store = FilesystemBlockStorage(tmp_path)
+    store.save(Block(id="", body="## Lumber\n\nA lumber yard.\n"), filename_stem="lumber")
+
+    store.set_preserved("lumber", True)
+
+    assert store.load("lumber").preserved is True
+
+
+def test_set_preserved_true_twice_is_idempotent(tmp_path):
+    store = FilesystemBlockStorage(tmp_path)
+    store.save(Block(id="", body="## Lumber\n\nA lumber yard.\n"), filename_stem="lumber")
+
+    store.set_preserved("lumber", True)
+    store.set_preserved("lumber", True)
+
+    assert store.load("lumber").preserved is True
+
+
+def test_set_preserved_false_unpreserves_and_is_idempotent(tmp_path):
+    store = FilesystemBlockStorage(tmp_path)
+    store.save(Block(id="", body="## Lumber\n\nA lumber yard.\n"), filename_stem="lumber")
+    store.set_preserved("lumber", True)
+
+    store.set_preserved("lumber", False)
+    store.set_preserved("lumber", False)
+
+    assert store.load("lumber").preserved is False
+
+
+def test_set_preserved_on_unknown_block_raises(tmp_path):
+    store = FilesystemBlockStorage(tmp_path)
+    with pytest.raises(BlockNotFoundError):
+        store.set_preserved("nope", True)
+
+
+def test_clear_deletes_unpreserved_blocks_and_keeps_preserved(tmp_path):
+    store = FilesystemBlockStorage(tmp_path)
+    store.save(Block(id="", body="## Lumber\n\nA.\n"), filename_stem="lumber")
+    store.save(Block(id="", body="## Police Station\n\nB.\n"), filename_stem="police_station")
+    store.save(Block(id="", body="## School\n\nC.\n"), filename_stem="school")
+    store.set_preserved("school", True)
+
+    result = store.clear()
+
+    assert result == ClearResult(deleted=2, skipped_preserved=1)
+    assert {b.id for b in store.all()} == {"school"}
+
+
+def test_clear_again_on_all_preserved_blocks_deletes_nothing(tmp_path):
+    store = FilesystemBlockStorage(tmp_path)
+    store.save(Block(id="", body="## School\n\nC.\n"), filename_stem="school")
+    store.set_preserved("school", True)
+
+    result = store.clear()
+
+    assert result == ClearResult(deleted=0, skipped_preserved=1)
+    assert store.exists("school") is True
+
+
+def test_clear_after_unpreserving_last_block_deletes_it(tmp_path):
+    store = FilesystemBlockStorage(tmp_path)
+    store.save(Block(id="", body="## School\n\nC.\n"), filename_stem="school")
+    store.set_preserved("school", True)
+    store.set_preserved("school", False)
+
+    result = store.clear()
+
+    assert result == ClearResult(deleted=1, skipped_preserved=0)
+    assert store.all() == []
+
+
+def test_clear_on_empty_block_store_is_a_noop(tmp_path):
+    store = FilesystemBlockStorage(tmp_path)
+    result = store.clear()
+    assert result == ClearResult(deleted=0, skipped_preserved=0)
+
+
+def test_clearing_block_store_does_not_touch_result_store(tmp_path):
+    block_store = FilesystemBlockStorage(tmp_path / "blocks")
+    result_store = FilesystemResultStorage(tmp_path / "results")
+    block_store.save(Block(id="", body="## Lumber\n\nA.\n"), filename_stem="lumber")
+    result_store.save(Result(content="## School\n\nB.\n", name="School"), filename_stem="school")
+
+    block_store.clear()
+
+    assert block_store.all() == []
+    assert {r.id for r in result_store.all()} == {"school"}
+
+
+def test_clearing_result_store_does_not_touch_block_store(tmp_path):
+    block_store = FilesystemBlockStorage(tmp_path / "blocks")
+    result_store = FilesystemResultStorage(tmp_path / "results")
+    block_store.save(Block(id="", body="## Lumber\n\nA.\n"), filename_stem="lumber")
+    result_store.save(Result(content="## School\n\nB.\n", name="School"), filename_stem="school")
+
+    result_store.clear()
+
+    assert result_store.all() == []
+    assert {b.id for b in block_store.all()} == {"lumber"}
+
+
+def test_clear_tolerates_a_block_file_already_unlinked_concurrently(tmp_path, monkeypatch):
+    """FR-015: a file removed by something else mid-pass (after clear() has already listed
+    it, before clear() reaches its own unlink) must not raise, and still counts toward
+    deleted."""
+    store = FilesystemBlockStorage(tmp_path)
+    store.save(Block(id="", body="## Lumber\n\nA.\n"), filename_stem="lumber")
+    store.save(Block(id="", body="## Police Station\n\nB.\n"), filename_stem="police_station")
+    victim = store.path_for("police_station")
+    real_unlink = Path.unlink
+
+    def racy_unlink(self, *args, **kwargs):
+        if self == store.path_for("lumber") and victim.exists():
+            victim.unlink()
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", racy_unlink)
+
+    result = store.clear()
+
+    assert result == ClearResult(deleted=2, skipped_preserved=0)
+    assert store.all() == []
+
+
+def test_set_preserved_marks_a_fresh_result_preserved(tmp_path):
+    store = FilesystemResultStorage(tmp_path)
+    store.save(Result(content="## School\n\nA.\n", name="School"), filename_stem="school")
+
+    store.set_preserved("school", True)
+
+    assert store.load("school").preserved is True
+
+
+def test_set_preserved_true_twice_on_result_is_idempotent(tmp_path):
+    store = FilesystemResultStorage(tmp_path)
+    store.save(Result(content="## School\n\nA.\n", name="School"), filename_stem="school")
+
+    store.set_preserved("school", True)
+    store.set_preserved("school", True)
+
+    assert store.load("school").preserved is True
+
+
+def test_set_preserved_false_unpreserves_result_and_is_idempotent(tmp_path):
+    store = FilesystemResultStorage(tmp_path)
+    store.save(Result(content="## School\n\nA.\n", name="School"), filename_stem="school")
+    store.set_preserved("school", True)
+
+    store.set_preserved("school", False)
+    store.set_preserved("school", False)
+
+    assert store.load("school").preserved is False
+
+
+def test_set_preserved_on_unknown_result_raises(tmp_path):
+    store = FilesystemResultStorage(tmp_path)
+    with pytest.raises(BlockNotFoundError):
+        store.set_preserved("nope", True)
+
+
+def test_clear_deletes_unpreserved_results_and_keeps_preserved(tmp_path):
+    store = FilesystemResultStorage(tmp_path)
+    store.save(Result(content="## School\n\nA.\n", name="School"), filename_stem="school")
+    store.save(Result(content="## Lumber\n\nB.\n", name="Lumber"), filename_stem="lumber")
+    store.save(Result(content="## Police\n\nC.\n", name="Police"), filename_stem="police")
+    store.set_preserved("police", True)
+
+    result = store.clear()
+
+    assert result == ClearResult(deleted=2, skipped_preserved=1)
+    assert {r.id for r in store.all()} == {"police"}
+
+
+def test_clear_again_on_all_preserved_results_deletes_nothing(tmp_path):
+    store = FilesystemResultStorage(tmp_path)
+    store.save(Result(content="## Police\n\nC.\n", name="Police"), filename_stem="police")
+    store.set_preserved("police", True)
+
+    result = store.clear()
+
+    assert result == ClearResult(deleted=0, skipped_preserved=1)
+    assert store.exists("police") is True
+
+
+def test_clear_after_unpreserving_last_result_deletes_it(tmp_path):
+    store = FilesystemResultStorage(tmp_path)
+    store.save(Result(content="## Police\n\nC.\n", name="Police"), filename_stem="police")
+    store.set_preserved("police", True)
+    store.set_preserved("police", False)
+
+    result = store.clear()
+
+    assert result == ClearResult(deleted=1, skipped_preserved=0)
+    assert store.all() == []
+
+
+def test_clear_on_empty_result_store_is_a_noop(tmp_path):
+    store = FilesystemResultStorage(tmp_path)
+    result = store.clear()
+    assert result == ClearResult(deleted=0, skipped_preserved=0)
+
+
+def test_clear_tolerates_a_result_file_already_unlinked_concurrently(tmp_path, monkeypatch):
+    store = FilesystemResultStorage(tmp_path)
+    store.save(Result(content="## School\n\nA.\n", name="School"), filename_stem="school")
+    store.save(Result(content="## Lumber\n\nB.\n", name="Lumber"), filename_stem="lumber")
+    victim = store.path_for("school")
+    real_unlink = Path.unlink
+
+    def racy_unlink(self, *args, **kwargs):
+        if self == store.path_for("lumber") and victim.exists():
+            victim.unlink()
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", racy_unlink)
+
+    result = store.clear()
+
+    assert result == ClearResult(deleted=2, skipped_preserved=0)
+    assert store.all() == []

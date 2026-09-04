@@ -85,6 +85,7 @@ class GenerateStartRequest(BaseModel):
     style_from: list[str] = []
     model: str | None = None
     name: str | None = None
+    preserve: bool = False
 
 
 class MutateStartRequest(BaseModel):
@@ -93,6 +94,7 @@ class MutateStartRequest(BaseModel):
     model: str | None = None
     in_place: bool = False
     name: str | None = None
+    preserve: bool = False
 
 
 class DissectStartRequest(BaseModel):
@@ -108,6 +110,7 @@ class ComposeStartRequest(BaseModel):
     model: str | None = None
     max_generate: int | None = None
     name: str | None = None
+    preserve: bool = False
 
 
 class BlockUpdateRequest(BaseModel):
@@ -127,6 +130,7 @@ class BlockSummary(BaseModel):
     block_schema: str | None = Field(alias="schema")
     source: str
     created_at: datetime | None
+    preserved: bool
 
     @classmethod
     def from_block(cls, block: Block) -> "BlockSummary":
@@ -137,6 +141,7 @@ class BlockSummary(BaseModel):
             schema=block.schema,
             source=block.source,
             created_at=block.created_at,
+            preserved=block.preserved,
         )
 
 
@@ -153,6 +158,7 @@ class BlockDetail(BaseModel):
     created_by: str
     generation_criteria: str | None
     mutated_from: str | None
+    preserved: bool
 
     @classmethod
     def from_block(cls, block: Block) -> "BlockDetail":
@@ -167,6 +173,7 @@ class BlockDetail(BaseModel):
             created_by=block.created_by,
             generation_criteria=block.generation_criteria,
             mutated_from=block.mutated_from,
+            preserved=block.preserved,
         )
 
 
@@ -175,6 +182,7 @@ class ResultSummary(BaseModel):
     name: str
     request: str
     created_at: datetime | None
+    preserved: bool
 
     @classmethod
     def from_result(cls, result: Result) -> "ResultSummary":
@@ -183,6 +191,7 @@ class ResultSummary(BaseModel):
             name=result.name,
             request=result.request,
             created_at=result.created_at,
+            preserved=result.preserved,
         )
 
 
@@ -195,6 +204,7 @@ class ResultDetail(BaseModel):
     use_ids: list[str]
     generate_criteria: list[str]
     slots: list[dict]
+    preserved: bool
 
     @classmethod
     def from_result(cls, result: Result) -> "ResultDetail":
@@ -207,6 +217,7 @@ class ResultDetail(BaseModel):
             use_ids=result.use_ids,
             generate_criteria=result.generate_criteria,
             slots=result.slots,
+            preserved=result.preserved,
         )
 
 
@@ -240,6 +251,7 @@ def generate_start(payload: GenerateStartRequest, key: str):
             model_spec=payload.model,
             name=payload.name,
             on_progress=on_progress,
+            preserve=payload.preserve,
         )
         if decision.action == "skip_duplicate":
             return {"block_id": None, "duplicate": True, "duplicate_of": decision.duplicate_of}
@@ -282,6 +294,7 @@ def mutate_start(payload: MutateStartRequest, key: str):
             in_place=payload.in_place,
             name=payload.name,
             on_progress=on_progress,
+            preserve=payload.preserve,
         )
         return {"block_id": stem}
 
@@ -374,6 +387,7 @@ def compose_start(payload: ComposeStartRequest, key: str):
             name=payload.name,
             on_progress=on_progress,
             cancel_check=cancel_event.is_set,
+            preserve=payload.preserve,
         )
         return {
             "result_id": outcome.result_id,
@@ -454,6 +468,45 @@ def blocks_delete(block_id: str, key: str):
     return {"deleted": block_id}
 
 
+@app.post("/blocks/{block_id}/preserve")
+def blocks_preserve(block_id: str, key: str):
+    settings = load_settings()
+    if not _authorized(settings, key):
+        return PlainTextResponse("Unauthorized", status_code=401)
+
+    store = get_block_storage(settings)
+    try:
+        store.set_preserved(block_id, True)
+    except BlockNotFoundError as exc:
+        return PlainTextResponse(str(exc), status_code=404)
+    return {"preserved": block_id}
+
+
+@app.post("/blocks/{block_id}/unpreserve")
+def blocks_unpreserve(block_id: str, key: str):
+    settings = load_settings()
+    if not _authorized(settings, key):
+        return PlainTextResponse("Unauthorized", status_code=401)
+
+    store = get_block_storage(settings)
+    try:
+        store.set_preserved(block_id, False)
+    except BlockNotFoundError as exc:
+        return PlainTextResponse(str(exc), status_code=404)
+    return {"preserved": False}
+
+
+@app.post("/blocks/clear")
+def blocks_clear(key: str):
+    settings = load_settings()
+    if not _authorized(settings, key):
+        return PlainTextResponse("Unauthorized", status_code=401)
+
+    store = get_block_storage(settings)
+    result = store.clear()
+    return {"deleted": result.deleted, "skipped_preserved": result.skipped_preserved}
+
+
 @app.get("/results")
 def results_list(key: str, query: str | None = None):
     settings = load_settings()
@@ -491,6 +544,45 @@ def results_delete(result_id: str, key: str):
     except BlockNotFoundError as exc:
         return PlainTextResponse(str(exc), status_code=404)
     return {"deleted": result_id}
+
+
+@app.post("/results/{result_id}/preserve")
+def results_preserve(result_id: str, key: str):
+    settings = load_settings()
+    if not _authorized(settings, key):
+        return PlainTextResponse("Unauthorized", status_code=401)
+
+    store = get_result_storage(settings)
+    try:
+        store.set_preserved(result_id, True)
+    except BlockNotFoundError as exc:
+        return PlainTextResponse(str(exc), status_code=404)
+    return {"preserved": result_id}
+
+
+@app.post("/results/{result_id}/unpreserve")
+def results_unpreserve(result_id: str, key: str):
+    settings = load_settings()
+    if not _authorized(settings, key):
+        return PlainTextResponse("Unauthorized", status_code=401)
+
+    store = get_result_storage(settings)
+    try:
+        store.set_preserved(result_id, False)
+    except BlockNotFoundError as exc:
+        return PlainTextResponse(str(exc), status_code=404)
+    return {"preserved": False}
+
+
+@app.post("/results/clear")
+def results_clear(key: str):
+    settings = load_settings()
+    if not _authorized(settings, key):
+        return PlainTextResponse("Unauthorized", status_code=401)
+
+    store = get_result_storage(settings)
+    result = store.clear()
+    return {"deleted": result.deleted, "skipped_preserved": result.skipped_preserved}
 
 
 @app.get("/stream/{job_id}")

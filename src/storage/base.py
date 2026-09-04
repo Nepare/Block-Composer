@@ -28,6 +28,7 @@ class Result:
     slots: list[dict] = field(default_factory=list)
     progress_log: list[ProgressEvent] = field(default_factory=list)
     created_at: datetime | None = None
+    preserved: bool = False
 
     def to_candidate(self) -> Candidate:
         return Candidate(name=self.name, full_text=self.content)
@@ -41,6 +42,7 @@ class Result:
             "generate_criteria": self.generate_criteria,
             "slots": self.slots,
             "created_at": (self.created_at or datetime.now(timezone.utc)).isoformat(),
+            "preserved": self.preserved,
         }
         return frontmatter.Post(self.content.strip() + "\n", **meta)
 
@@ -65,7 +67,14 @@ class Result:
             generate_criteria=list(meta.get("generate_criteria") or []),
             slots=list(meta.get("slots") or []),
             created_at=created_at,
+            preserved=bool(meta.get("preserved", False)),
         )
+
+
+@dataclass(frozen=True)
+class ClearResult:
+    deleted: int
+    skipped_preserved: int
 
 
 class BlockStorage(Protocol):
@@ -89,6 +98,8 @@ class BlockStorage(Protocol):
         explicit_base: str | None = None,
     ) -> tuple[NamingDecision, str | None]: ...
     def delete(self, filename_stem: str) -> None: ...
+    def set_preserved(self, filename_stem: str, preserved: bool) -> None: ...
+    def clear(self) -> ClearResult: ...
 
 
 class ResultStorage(Protocol):
@@ -110,6 +121,8 @@ class ResultStorage(Protocol):
         explicit_base: str | None = None,
     ) -> tuple[NamingDecision, str | None]: ...
     def delete(self, filename_stem: str) -> None: ...
+    def set_preserved(self, filename_stem: str, preserved: bool) -> None: ...
+    def clear(self) -> ClearResult: ...
 
 
 class CredentialsStorage(Protocol):

@@ -14,7 +14,7 @@ from google.oauth2.credentials import Credentials
 from core import naming
 from models.blocks import Block
 from core.errors import BlockNotFoundError
-from storage.base import Result
+from storage.base import ClearResult, Result
 
 DEFAULT_USER_ID = "default"
 
@@ -45,10 +45,14 @@ class SqliteBlockStorage:
                 created_by TEXT NOT NULL DEFAULT 'manual',
                 created_at TEXT,
                 generation_criteria TEXT,
-                mutated_from TEXT
+                mutated_from TEXT,
+                preserved INTEGER NOT NULL DEFAULT 0
             )
             """
         )
+        cols = [row["name"] for row in self._conn.execute("PRAGMA table_info(blocks)").fetchall()]
+        if "preserved" not in cols:
+            self._conn.execute("ALTER TABLE blocks ADD COLUMN preserved INTEGER NOT NULL DEFAULT 0")
 
     def path_for(self, filename_stem: str) -> None:
         return None
@@ -69,19 +73,20 @@ class SqliteBlockStorage:
             created_at=datetime.fromisoformat(row["created_at"]) if row["created_at"] else None,
             generation_criteria=row["generation_criteria"],
             mutated_from=row["mutated_from"],
+            preserved=bool(row["preserved"]),
         )
 
     def _insert(self, block: Block, stem: str) -> None:
         self._conn.execute(
             """
             INSERT INTO blocks (id, body, schema, tags, source, created_by, created_at,
-                                 generation_criteria, mutated_from)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                 generation_criteria, mutated_from, preserved)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 body=excluded.body, schema=excluded.schema, tags=excluded.tags,
                 source=excluded.source, created_by=excluded.created_by,
                 created_at=excluded.created_at, generation_criteria=excluded.generation_criteria,
-                mutated_from=excluded.mutated_from
+                mutated_from=excluded.mutated_from, preserved=excluded.preserved
             """,
             (
                 stem,
@@ -93,6 +98,7 @@ class SqliteBlockStorage:
                 (block.created_at or datetime.now(timezone.utc)).isoformat(),
                 block.generation_criteria,
                 block.mutated_from,
+                block.preserved,
             ),
         )
 
@@ -128,6 +134,35 @@ class SqliteBlockStorage:
             raise
         else:
             self._conn.execute("COMMIT")
+
+    def set_preserved(self, filename_stem: str, preserved: bool) -> None:
+        self._conn.execute("BEGIN")
+        try:
+            cursor = self._conn.execute(
+                "UPDATE blocks SET preserved = ? WHERE id = ?", (int(preserved), filename_stem)
+            )
+            if cursor.rowcount == 0:
+                self._conn.execute("ROLLBACK")
+                raise BlockNotFoundError(f"No block {filename_stem!r} in {self.path}")
+        except BlockNotFoundError:
+            raise
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
+        else:
+            self._conn.execute("COMMIT")
+
+    def clear(self) -> ClearResult:
+        self._conn.execute("BEGIN")
+        try:
+            cursor = self._conn.execute("DELETE FROM blocks WHERE preserved = 0")
+            deleted = cursor.rowcount
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
+        self._conn.execute("COMMIT")
+        skipped = self._conn.execute("SELECT COUNT(*) FROM blocks").fetchone()[0]
+        return ClearResult(deleted=deleted, skipped_preserved=skipped)
 
     def all(self) -> list[Block]:
         rows = self._conn.execute("SELECT * FROM blocks ORDER BY id").fetchall()
@@ -218,10 +253,14 @@ class SqliteResultStorage:
                 generate_criteria TEXT NOT NULL DEFAULT '[]',
                 slots TEXT NOT NULL DEFAULT '[]',
                 progress_log TEXT NOT NULL DEFAULT '[]',
-                created_at TEXT
+                created_at TEXT,
+                preserved INTEGER NOT NULL DEFAULT 0
             )
             """
         )
+        cols = [row["name"] for row in self._conn.execute("PRAGMA table_info(results)").fetchall()]
+        if "preserved" not in cols:
+            self._conn.execute("ALTER TABLE results ADD COLUMN preserved INTEGER NOT NULL DEFAULT 0")
 
     def path_for(self, filename_stem: str) -> None:
         return None
@@ -242,19 +281,20 @@ class SqliteResultStorage:
             slots=json.loads(row["slots"]),
             progress_log=[],  # not populated by any caller yet
             created_at=datetime.fromisoformat(row["created_at"]) if row["created_at"] else None,
+            preserved=bool(row["preserved"]),
         )
 
     def _insert(self, result: Result, stem: str) -> None:
         self._conn.execute(
             """
             INSERT INTO results (id, content, name, request, use_ids, generate_criteria,
-                                  slots, progress_log, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  slots, progress_log, created_at, preserved)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 content=excluded.content, name=excluded.name, request=excluded.request,
                 use_ids=excluded.use_ids, generate_criteria=excluded.generate_criteria,
                 slots=excluded.slots, progress_log=excluded.progress_log,
-                created_at=excluded.created_at
+                created_at=excluded.created_at, preserved=excluded.preserved
             """,
             (
                 stem,
@@ -266,6 +306,7 @@ class SqliteResultStorage:
                 json.dumps(result.slots),
                 json.dumps([]),  # progress_log isn't populated by any caller yet
                 (result.created_at or datetime.now(timezone.utc)).isoformat(),
+                result.preserved,
             ),
         )
 
@@ -301,6 +342,35 @@ class SqliteResultStorage:
             raise
         else:
             self._conn.execute("COMMIT")
+
+    def set_preserved(self, filename_stem: str, preserved: bool) -> None:
+        self._conn.execute("BEGIN")
+        try:
+            cursor = self._conn.execute(
+                "UPDATE results SET preserved = ? WHERE id = ?", (int(preserved), filename_stem)
+            )
+            if cursor.rowcount == 0:
+                self._conn.execute("ROLLBACK")
+                raise BlockNotFoundError(f"No result {filename_stem!r} in {self.path}")
+        except BlockNotFoundError:
+            raise
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
+        else:
+            self._conn.execute("COMMIT")
+
+    def clear(self) -> ClearResult:
+        self._conn.execute("BEGIN")
+        try:
+            cursor = self._conn.execute("DELETE FROM results WHERE preserved = 0")
+            deleted = cursor.rowcount
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
+        self._conn.execute("COMMIT")
+        skipped = self._conn.execute("SELECT COUNT(*) FROM results").fetchone()[0]
+        return ClearResult(deleted=deleted, skipped_preserved=skipped)
 
     def all(self) -> list[Result]:
         rows = self._conn.execute("SELECT * FROM results ORDER BY id").fetchall()

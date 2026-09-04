@@ -87,6 +87,68 @@ def test_mutate_name_is_passed_through(cli_settings, monkeypatch):
     assert captured["name"] == "widget"
 
 
+def test_generate_preserve_flag_is_passed_through(cli_settings, monkeypatch):
+    captured = {}
+
+    def fake_run_generate(criteria, **kwargs):
+        captured["preserve"] = kwargs.get("preserve")
+        return SimpleNamespace(), SimpleNamespace(action="save_plain", duplicate_of=None), "result"
+
+    monkeypatch.setattr(cli.generate_module, "run_generate", fake_run_generate)
+
+    result = runner.invoke(cli.app, ["generate", "--criteria", "x", "--preserve"])
+
+    assert result.exit_code == 0
+    assert captured["preserve"] is True
+
+
+def test_generate_without_preserve_flag_defaults_to_false(cli_settings, monkeypatch):
+    captured = {}
+
+    def fake_run_generate(criteria, **kwargs):
+        captured["preserve"] = kwargs.get("preserve")
+        return SimpleNamespace(), SimpleNamespace(action="save_plain", duplicate_of=None), "result"
+
+    monkeypatch.setattr(cli.generate_module, "run_generate", fake_run_generate)
+
+    result = runner.invoke(cli.app, ["generate", "--criteria", "x"])
+
+    assert result.exit_code == 0
+    assert captured["preserve"] is False
+
+
+def test_mutate_preserve_flag_is_passed_through(cli_settings, monkeypatch):
+    captured = {}
+
+    def fake_run_mutate(block_id, criteria, **kwargs):
+        captured["preserve"] = kwargs.get("preserve")
+        return SimpleNamespace(), "result"
+
+    monkeypatch.setattr(cli.mutate_module, "run_mutate", fake_run_mutate)
+
+    result = runner.invoke(cli.app, ["mutate", "some-id", "--criteria", "x", "--preserve"])
+
+    assert result.exit_code == 0
+    assert captured["preserve"] is True
+
+
+def test_mutate_preserve_combined_with_in_place(cli_settings, monkeypatch):
+    captured = {}
+
+    def fake_run_mutate(block_id, criteria, **kwargs):
+        captured["preserve"] = kwargs.get("preserve")
+        captured["in_place"] = kwargs.get("in_place")
+        return SimpleNamespace(), "result"
+
+    monkeypatch.setattr(cli.mutate_module, "run_mutate", fake_run_mutate)
+
+    result = runner.invoke(cli.app, ["mutate", "some-id", "--criteria", "x", "--preserve", "--in-place"])
+
+    assert result.exit_code == 0
+    assert captured["preserve"] is True
+    assert captured["in_place"] is True
+
+
 def test_mutate_input_error_fails_clearly(cli_settings, monkeypatch):
     def fake_run_mutate(block_id, criteria, **kwargs):
         raise InputError("name and --in-place cannot be combined")
@@ -112,6 +174,21 @@ def test_compose_name_is_passed_through(cli_settings, monkeypatch):
 
     assert result.exit_code == 0
     assert captured["name"] == "widget"
+
+
+def test_compose_preserve_flag_is_passed_through(cli_settings, monkeypatch):
+    captured = {}
+
+    def fake_run_compose(request, **kwargs):
+        captured["preserve"] = kwargs.get("preserve")
+        return ComposeOutcome(slots=[], result_path=None, result_id=None, name=None, content=None, cancelled=False)
+
+    monkeypatch.setattr(cli.compose_module, "run_compose", fake_run_compose)
+
+    result = runner.invoke(cli.app, ["compose", "some request", "--preserve", "--dry-run"])
+
+    assert result.exit_code == 0
+    assert captured["preserve"] is True
 
 
 def test_compose_request_file_is_read_and_passed_through(tmp_path, cli_settings, monkeypatch):
@@ -179,6 +256,68 @@ def test_blocks_delete_missing_id_fails(cli_settings):
     assert "does-not-exist" in result.output
 
 
+def test_blocks_preserve_marks_existing_block_preserved(cli_settings):
+    store = get_block_storage(cli_settings)
+    store.save(Block(id="", body="# A block\nbody text"), filename_stem="a-block")
+
+    result = runner.invoke(cli.app, ["blocks", "preserve", "a-block"])
+
+    assert result.exit_code == 0
+    assert store.load("a-block").preserved is True
+
+
+def test_blocks_preserve_is_idempotent(cli_settings):
+    store = get_block_storage(cli_settings)
+    store.save(Block(id="", body="# A block\nbody text"), filename_stem="a-block")
+
+    result1 = runner.invoke(cli.app, ["blocks", "preserve", "a-block"])
+    result2 = runner.invoke(cli.app, ["blocks", "preserve", "a-block"])
+
+    assert result1.exit_code == 0
+    assert result2.exit_code == 0
+    assert store.load("a-block").preserved is True
+
+
+def test_blocks_unpreserve_marks_preserved_block_not_preserved(cli_settings):
+    store = get_block_storage(cli_settings)
+    store.save(Block(id="", body="# A block\nbody text"), filename_stem="a-block")
+    runner.invoke(cli.app, ["blocks", "preserve", "a-block"])
+
+    result = runner.invoke(cli.app, ["blocks", "unpreserve", "a-block"])
+
+    assert result.exit_code == 0
+    assert store.load("a-block").preserved is False
+
+
+def test_blocks_unpreserve_is_idempotent(cli_settings):
+    store = get_block_storage(cli_settings)
+    store.save(Block(id="", body="# A block\nbody text"), filename_stem="a-block")
+
+    result = runner.invoke(cli.app, ["blocks", "unpreserve", "a-block"])
+
+    assert result.exit_code == 0
+    assert store.load("a-block").preserved is False
+
+
+def test_blocks_preserve_missing_id_fails(cli_settings):
+    result = runner.invoke(cli.app, ["blocks", "preserve", "does-not-exist"])
+
+    assert result.exit_code == 1
+    assert "does-not-exist" in result.output
+
+
+def test_blocks_show_reflects_preserved_state(cli_settings):
+    store = get_block_storage(cli_settings)
+    store.save(Block(id="", body="# A block\nbody text"), filename_stem="a-block")
+    runner.invoke(cli.app, ["blocks", "preserve", "a-block"])
+
+    result = runner.invoke(cli.app, ["blocks", "show", "a-block"])
+
+    assert result.exit_code == 0
+    assert "Preserved" in result.output
+    assert "True" in result.output
+
+
 def test_results_delete_removes_existing_result(cli_settings):
     store = get_result_storage(cli_settings)
     store.save(Result(id="", content="result body", name="a-result", request="req"), filename_stem="a-result")
@@ -195,6 +334,174 @@ def test_results_delete_missing_id_fails(cli_settings):
 
     assert result.exit_code == 1
     assert "does-not-exist" in result.output
+
+
+def test_results_preserve_marks_existing_result_preserved(cli_settings):
+    store = get_result_storage(cli_settings)
+    store.save(Result(id="", content="result body", name="a-result", request="req"), filename_stem="a-result")
+
+    result = runner.invoke(cli.app, ["results", "preserve", "a-result"])
+
+    assert result.exit_code == 0
+    assert store.load("a-result").preserved is True
+
+
+def test_results_preserve_is_idempotent(cli_settings):
+    store = get_result_storage(cli_settings)
+    store.save(Result(id="", content="result body", name="a-result", request="req"), filename_stem="a-result")
+
+    result1 = runner.invoke(cli.app, ["results", "preserve", "a-result"])
+    result2 = runner.invoke(cli.app, ["results", "preserve", "a-result"])
+
+    assert result1.exit_code == 0
+    assert result2.exit_code == 0
+    assert store.load("a-result").preserved is True
+
+
+def test_results_unpreserve_marks_preserved_result_not_preserved(cli_settings):
+    store = get_result_storage(cli_settings)
+    store.save(Result(id="", content="result body", name="a-result", request="req"), filename_stem="a-result")
+    runner.invoke(cli.app, ["results", "preserve", "a-result"])
+
+    result = runner.invoke(cli.app, ["results", "unpreserve", "a-result"])
+
+    assert result.exit_code == 0
+    assert store.load("a-result").preserved is False
+
+
+def test_results_unpreserve_is_idempotent(cli_settings):
+    store = get_result_storage(cli_settings)
+    store.save(Result(id="", content="result body", name="a-result", request="req"), filename_stem="a-result")
+
+    result = runner.invoke(cli.app, ["results", "unpreserve", "a-result"])
+
+    assert result.exit_code == 0
+    assert store.load("a-result").preserved is False
+
+
+def test_results_preserve_missing_id_fails(cli_settings):
+    result = runner.invoke(cli.app, ["results", "preserve", "does-not-exist"])
+
+    assert result.exit_code == 1
+    assert "does-not-exist" in result.output
+
+
+def test_results_show_reflects_preserved_state(cli_settings):
+    store = get_result_storage(cli_settings)
+    store.save(Result(id="", content="result body", name="a-result", request="req"), filename_stem="a-result")
+    runner.invoke(cli.app, ["results", "preserve", "a-result"])
+
+    result = runner.invoke(cli.app, ["results", "show", "a-result"])
+
+    assert result.exit_code == 0
+    assert "Preserved" in result.output
+    assert "True" in result.output
+
+
+def test_blocks_clear_removes_unpreserved_keeps_preserved(cli_settings):
+    store = get_block_storage(cli_settings)
+    store.save(Block(id="", body="# Block 1\nbody"), filename_stem="block-1")
+    store.save(Block(id="", body="# Block 2\nbody"), filename_stem="block-2")
+    store.save(Block(id="", body="# Block 3\nbody"), filename_stem="block-3")
+    runner.invoke(cli.app, ["blocks", "preserve", "block-2"])
+
+    result = runner.invoke(cli.app, ["blocks", "clear"])
+
+    assert result.exit_code == 0
+    assert "deleted=2" in result.output
+    assert "skipped_preserved=1" in result.output
+    assert not store.exists("block-1")
+    assert store.exists("block-2")
+    assert not store.exists("block-3")
+
+
+def test_blocks_clear_on_empty_library_reports_zero(cli_settings):
+    result = runner.invoke(cli.app, ["blocks", "clear"])
+
+    assert result.exit_code == 0
+    assert "deleted=0" in result.output
+    assert "skipped_preserved=0" in result.output
+
+
+def test_blocks_clear_all_preserved_deletes_nothing(cli_settings):
+    store = get_block_storage(cli_settings)
+    store.save(Block(id="", body="# Block 1\nbody"), filename_stem="block-1")
+    store.save(Block(id="", body="# Block 2\nbody"), filename_stem="block-2")
+    runner.invoke(cli.app, ["blocks", "preserve", "block-1"])
+    runner.invoke(cli.app, ["blocks", "preserve", "block-2"])
+
+    result = runner.invoke(cli.app, ["blocks", "clear"])
+
+    assert result.exit_code == 0
+    assert "deleted=0" in result.output
+    assert "skipped_preserved=2" in result.output
+    assert store.exists("block-1")
+    assert store.exists("block-2")
+
+
+def test_blocks_clear_does_not_affect_results(cli_settings):
+    block_store = get_block_storage(cli_settings)
+    result_store = get_result_storage(cli_settings)
+    block_store.save(Block(id="", body="# A block\nbody text"), filename_stem="a-block")
+    result_store.save(Result(id="", content="result body", name="a-result", request="req"), filename_stem="a-result")
+
+    result = runner.invoke(cli.app, ["blocks", "clear"])
+
+    assert result.exit_code == 0
+    assert result_store.exists("a-result")
+
+
+def test_results_clear_on_empty_library_reports_zero(cli_settings):
+    result = runner.invoke(cli.app, ["results", "clear"])
+
+    assert result.exit_code == 0
+    assert "deleted=0" in result.output
+    assert "skipped_preserved=0" in result.output
+
+
+def test_results_clear_removes_unpreserved_keeps_preserved(cli_settings):
+    store = get_result_storage(cli_settings)
+    store.save(Result(id="", content="body", name="result-1", request="req"), filename_stem="result-1")
+    store.save(Result(id="", content="body", name="result-2", request="req"), filename_stem="result-2")
+    store.save(Result(id="", content="body", name="result-3", request="req"), filename_stem="result-3")
+    runner.invoke(cli.app, ["results", "preserve", "result-2"])
+
+    result = runner.invoke(cli.app, ["results", "clear"])
+
+    assert result.exit_code == 0
+    assert "deleted=2" in result.output
+    assert "skipped_preserved=1" in result.output
+    assert not store.exists("result-1")
+    assert store.exists("result-2")
+    assert not store.exists("result-3")
+
+
+def test_results_clear_all_preserved_deletes_nothing(cli_settings):
+    store = get_result_storage(cli_settings)
+    store.save(Result(id="", content="body", name="result-1", request="req"), filename_stem="result-1")
+    store.save(Result(id="", content="body", name="result-2", request="req"), filename_stem="result-2")
+    runner.invoke(cli.app, ["results", "preserve", "result-1"])
+    runner.invoke(cli.app, ["results", "preserve", "result-2"])
+
+    result = runner.invoke(cli.app, ["results", "clear"])
+
+    assert result.exit_code == 0
+    assert "deleted=0" in result.output
+    assert "skipped_preserved=2" in result.output
+    assert store.exists("result-1")
+    assert store.exists("result-2")
+
+
+def test_results_clear_does_not_affect_blocks(cli_settings):
+    block_store = get_block_storage(cli_settings)
+    result_store = get_result_storage(cli_settings)
+    block_store.save(Block(id="", body="# A block\nbody text"), filename_stem="a-block")
+    result_store.save(Result(id="", content="result body", name="a-result", request="req"), filename_stem="a-result")
+
+    result = runner.invoke(cli.app, ["results", "clear"])
+
+    assert result.exit_code == 0
+    assert block_store.exists("a-block")
 
 
 def test_results_list_empty_is_not_an_error(cli_settings):

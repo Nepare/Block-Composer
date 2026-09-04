@@ -215,6 +215,7 @@ def run_compose(
     name: str | None = None,
     max_generate: int = 8,
     dry_run: bool = False,
+    preserve: bool = False,
     on_progress: ProgressSink | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> ComposeOutcome:
@@ -425,6 +426,7 @@ def run_compose(
         slots=ordered,
         name=name,
         explicit_base=explicit_base,
+        preserve=preserve,
     )
     return ComposeOutcome(
         slots=ordered, result_path=result_path, result_id=result_id, name=name, content=content, cancelled=False
@@ -457,6 +459,7 @@ def _save_result(
     slots: list[ComposeSlot],
     name: str | None = None,
     explicit_base: str | None = None,
+    preserve: bool = False,
 ) -> tuple[str | None, str | None, Path | None]:
     """`out_path`, if given, bypasses ResultStorage and writes exactly there instead."""
     if out_path:
@@ -482,6 +485,7 @@ def _save_result(
             }
             for s in slots
         ],
+        preserved=preserve,
     )
 
     if explicit_base is not None:
