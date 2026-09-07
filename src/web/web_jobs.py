@@ -66,7 +66,7 @@ def _event_json(event: ProgressEvent) -> str:
 
 async def sse_events(job: Job):
     loop = asyncio.get_running_loop()
-    while True:
+    while job.status == "running" or not job.queue.empty():
         event = await loop.run_in_executor(None, job.queue.get)
         if event is None:
             break
