@@ -87,6 +87,19 @@ def test_ollama_disables_thinking_and_passes_options_through(mock_urlopen):
 
 
 @patch("llm.providers.ollama.urllib.request.urlopen")
+def test_ollama_strips_a_leaked_leading_think_block(mock_urlopen):
+    """Some builds ignore `think: false` and emit a <think>...</think> block anyway."""
+    mock_urlopen.return_value = _fake_urlopen_cm(
+        {"message": {"content": "<think>need {\"steps\": []} shape</think>{\"steps\": []}"}}
+    )
+
+    client = OllamaClient()
+    result = client.chat([{"role": "user", "content": "hi"}], "qwen3:4b")
+
+    assert result == '{"steps": []}'
+
+
+@patch("llm.providers.ollama.urllib.request.urlopen")
 def test_ollama_wraps_connection_errors_as_llmerror(mock_urlopen):
     mock_urlopen.side_effect = RuntimeError("connection refused")
 

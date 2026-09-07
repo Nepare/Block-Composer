@@ -1,7 +1,10 @@
 import json
+import re
 import urllib.request
 
 from core.errors import LLMError
+
+_LEADING_THINK_BLOCK = re.compile(r"^\s*<think>.*?</think>\s*", re.DOTALL)
 
 
 class OllamaClient:
@@ -43,4 +46,6 @@ class OllamaClient:
                 f"Ollama request failed ({model}) — is `ollama serve` running and is the "
                 f"model pulled (`ollama pull {model}`)? {exc}"
             ) from exc
-        return data.get("message", {}).get("content") or ""
+        content = data.get("message", {}).get("content") or ""
+        # some builds ignore `think: false` and emit a leading <think> block anyway
+        return _LEADING_THINK_BLOCK.sub("", content, count=1)

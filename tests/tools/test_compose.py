@@ -179,6 +179,24 @@ def test_result_naming_variant_on_a_conflicting_rerun(settings, fake_router):
     assert client.call_count == 7
 
 
+def test_plan_reply_wrapped_in_rambling_commentary_still_parses(settings, fake_router):
+    """Regression: a local reasoning model (e.g. qwen3 via Ollama) ignoring "ONLY JSON" and
+    padding its reply with commentary that itself contains braces must not break parsing."""
+    _seed_library(settings)
+    plan_json = json.dumps({"steps": [{"order": 1, "action": "use", "block_id": "school", "criteria": None}]})
+    rambling_plan = (
+        f"We are to reply with ONLY a JSON object of the shape: {plan_json}\n"
+        'The instruction says: "Reply with ONLY a JSON object of the shape ...". '
+        'So we must output exactly that JSON.\n\nNote: the example given is: {"steps": []}.'
+    )
+    client = FakeLLMClient(replies=["NONE", rambling_plan, "school_overview"])
+    fake_router(compose_module, client)
+
+    outcome = compose_module.run_compose("need a school", settings=settings)
+
+    assert outcome.result_path.exists()
+
+
 def test_no_manifest_file_is_written(settings, fake_router, tmp_path):
     _seed_library(settings)
     plan = json.dumps({"steps": [{"order": 1, "action": "use", "block_id": "school", "criteria": None}]})

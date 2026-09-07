@@ -1,4 +1,3 @@
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -10,6 +9,7 @@ from tools import mutate
 from models.blocks import Block
 from core.config import Settings
 from core.errors import BlockValidationError, LLMError, OperationCancelled
+from core.json_extraction import iter_json_objects
 from llm.prompts import compose_prompt, result_name_prompt
 from llm.router import get_client_and_model
 from core.progress import ProgressEvent, ProgressSink
@@ -129,15 +129,10 @@ def _select_candidate_blocks(
 
 
 def _parse_plan_reply(reply: str) -> list[dict]:
-    start = reply.find("{")
-    end = reply.rfind("}")
-    if start == -1 or end == -1:
-        raise LLMError(f"No JSON object found in compose planner reply:\n{reply}")
-    try:
-        data = json.loads(reply[start : end + 1])
-        return data["steps"]
-    except (json.JSONDecodeError, KeyError, TypeError) as exc:
-        raise LLMError(f"Compose planner returned an unparsable plan: {exc}\n---\n{reply}") from exc
+    for obj in iter_json_objects(reply):
+        if isinstance(obj.get("steps"), list):
+            return obj["steps"]
+    raise LLMError(f"No usable JSON plan found in compose planner reply:\n{reply}")
 
 
 def _plan_with_llm(
