@@ -4,6 +4,7 @@ from datetime import datetime
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 import uvicorn
 
@@ -29,6 +30,14 @@ app = FastAPI()
 def _authorized(settings: Settings, key: str) -> bool:
     expected = os.environ.get(settings.auth.web_service.api_key_env, "")
     return bool(expected) and key == expected
+
+
+@app.get("/auth/check")
+def auth_check(key: str = ""):
+    settings = load_settings()
+    if not _authorized(settings, key):
+        return PlainTextResponse("Unauthorized", status_code=401)
+    return {"ok": True}
 
 
 @app.get("/auth/google/login")
@@ -607,6 +616,9 @@ def cancel(job_id: str, key: str):
 
     job.cancel_event.set()
     return {"status": "cancelling"}
+
+
+app.mount("/", StaticFiles(directory="frontend/dist", html=True), name="frontend")
 
 
 def _check_required_env(settings) -> None:

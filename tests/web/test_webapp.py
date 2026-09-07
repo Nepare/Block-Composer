@@ -79,6 +79,31 @@ def _connected_provider(settings):
     return WebAuthProvider(settings, FakeCredentialsStorage(creds))
 
 
+def test_auth_check_accepts_valid_key(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+
+    response = client.get("/auth/check", params={"key": "test-key"})
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+
+
+def test_auth_check_rejects_wrong_key(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+
+    response = client.get("/auth/check", params={"key": "wrong-key"})
+
+    assert response.status_code == 401
+
+
+def test_auth_check_rejects_missing_key(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+
+    response = client.get("/auth/check")
+
+    assert response.status_code == 401
+
+
 def test_generate_start_runs_in_background_and_saves(settings, monkeypatch, fake_router):
     client = _client(settings, monkeypatch)
     llm = FakeLLMClient(replies=["## Sheriff Outpost\n\nA frontier outpost.\n\n**Role:** nobody\n"])

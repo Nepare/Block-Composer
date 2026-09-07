@@ -156,8 +156,16 @@ doesn't connect the other.
 
 ### Web UI
 
-Not built yet — there is no frontend code in this repository today; the HTTP API below is 
-what a future web UI will call into.
+A React + TypeScript SPA lives in `frontend/` (Vite, Tailwind CSS v4, shadcn/ui, bun-managed).
+It's served same-origin by the FastAPI app — no separate frontend host, no CORS config. On first
+visit, paste the shared `CVDOCS_API_KEY` secret into the login screen; it's validated against
+`GET /auth/check` and persisted in the browser so subsequent visits skip the prompt. Past login,
+a Compose/Library tab shell is in place (tab content itself ships in later features).
+
+Local frontend development: `cd frontend && bun install && bun dev` (proxies to a separately
+running backend). Building it manually: `bun run build` (produces `frontend/dist`, served by the
+backend when present). The Docker image below builds and serves it automatically — no separate
+step needed.
 
 ### CLI
 

@@ -30,3 +30,6 @@ build/
 dist/
 .pytest_cache/
 .ruff_cache/
+
+# Frontend
+node_modules/
