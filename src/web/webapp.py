@@ -113,6 +113,7 @@ class ComposeStartRequest(BaseModel):
     preserve: bool = False
     restrict_generate: bool = False
     restrict_mutate: bool = False
+    from_block_ids: list[str] | None = None
 
 
 class BlockUpdateRequest(BaseModel):
@@ -399,6 +400,7 @@ def compose_start(payload: ComposeStartRequest, key: str):
             preserve=payload.preserve,
             restrict_generate=payload.restrict_generate,
             restrict_mutate=payload.restrict_mutate,
+            from_block_ids=payload.from_block_ids,
         )
         return {
             "result_id": outcome.result_id,

@@ -194,6 +194,7 @@ cvdocs compose "<request>" --name <name>                # skip the naming call, 
 cvdocs compose "<request>" --preserve                    # lock the produced result on creation
 cvdocs compose "<request>" --restrict-generate           # forbid brand-new blocks in the result
 cvdocs compose "<request>" --restrict-mutate             # forbid edited variants; existing blocks used as-is
+cvdocs compose "<request>" --from-blocks <block-id> --from-blocks <block-id>  # restrict candidates to exactly these blocks
 
 cvdocs results list                                    # browse saved compose results
 cvdocs results list --query <text>                     # substring search over name/content
@@ -231,6 +232,20 @@ exactly as originally authored; it has no equivalent feasibility check. The two 
 independent and may be combined, in which case the result is built entirely from existing
 blocks used exactly as-is.
 
+`compose`'s repeatable `--from-blocks <block-id>` restricts the planner's candidate pool to
+exactly the designated blocks — duplicates collapse silently, an unresolvable id rejects the
+whole call up front naming the offending id(s), and an empty set is rejected outright. Brand-new
+content is fully disabled for the call regardless of `--restrict-generate` (a harmless no-op
+alongside it), while mutation of a designated block stays available unless `--restrict-mutate` is
+also passed; designating a block makes it eligible, not mandatory, unless separately pinned via
+`--use`. Every `--use` id must itself be part of the designated set, else the call is rejected
+before any work starts. The feasibility check and narrowing-window widening described above apply
+unchanged, scoped to the designated set's size (its raw, unreduced distinct-block count) instead
+of the whole library's. Separately, and also on the plain no-`--from-blocks` path, whenever the
+eligible candidate pool already fits within what compose's own narrowing step would end up
+keeping, that narrowing analysis is skipped entirely and the whole pool goes straight to the
+planner unfiltered, with a status update noting the skip.
+
 ### HTTP
 
 Requires the hosted deployment from [Setup 3.2](#32-hosted-deployment-docker)
@@ -251,14 +266,20 @@ HTTP, gated by the same `?key=<CVDOCS_API_KEY>` credential as `/auth/google/logi
   (a shorter free-text field merged into `request` server-side) — accepts `request`,
   `specifiers`, `use_ids`, `generate_criteria`, `count` (`null` lets the model decide), `model`,
   `name` (skip the naming-model call, `_2`/`_3`/... on collision), `preserve` (lock the produced
-  result on creation), `max_generate`, `restrict_generate`, and `restrict_mutate`; no filesystem
-  output path or dry-run mode over HTTP. `restrict_generate` forbids the planner from producing
-  any brand-new block (rejected up front, before any work starts, if the library overall can't
+  result on creation), `max_generate`, `restrict_generate`, `restrict_mutate`, and
+  `from_block_ids`; no filesystem output path or dry-run mode over HTTP. `restrict_generate`
+  forbids the planner from producing any brand-new block (rejected up front, before any work
+  starts, if the library overall can't
   supply enough blocks for the request, naming the shortfall; the candidate-narrowing window is
   widened automatically with a distinct warning if it's just configured too small) and is
   rejected outright alongside a non-empty `generate_criteria`; `restrict_mutate` forbids any
   edited variant of an existing block, so every existing block in the result appears exactly as
-  originally authored. Both default to `false` and may be combined. Also returns
+  originally authored. Both default to `false` and may be combined. `from_block_ids`
+  (`list[str]`, defaults to `null`/omitted) restricts the candidate pool to exactly the given
+  block ids instead of the whole library — same duplicate-collapsing, unresolvable-id rejection,
+  empty-list rejection, `use_ids`-subset requirement, and set-scoped feasibility/widening behavior
+  as the CLI's `--from-blocks` (see above); brand-new content is fully disabled for the call
+  regardless of `restrict_generate`. Also returns
   `{"job_id": "..."}` immediately. Unlike the other three tools, a compose run is
   cancellable — see `POST /cancel/{job_id}` below. Its final outcome includes the finished
   document's `content`, saved `name`/`result_id`, and the ordered `slots` that produced it

@@ -195,6 +195,7 @@ def compose(
         None, "--request-file", "-f", help="Read the composition request from a UTF-8 .txt/.md file."
     ),
     use: list[str] = typer.Option([], "--use"),
+    from_blocks: Optional[list[str]] = typer.Option(None, "--from-blocks"),
     generate_: list[str] = typer.Option([], "--generate"),
     out: Optional[Path] = typer.Option(None, "--out"),
     model: Optional[str] = typer.Option(None, "--model"),
@@ -220,6 +221,7 @@ def compose(
             request_text,
             settings=settings,
             use_ids=use,
+            from_block_ids=from_blocks,
             generate_criteria=generate_,
             out_path=out,
             model_spec=model,

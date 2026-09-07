@@ -538,12 +538,12 @@ def test_mutate_stream_delivers_progress_then_done_outcome(settings, monkeypatch
 
 
 def test_compose_stream_delivers_events_in_expected_order(settings, monkeypatch, fake_router):
-    FilesystemBlockStorage(settings.blocks_path).save(
-        Block(id="", body="## Block Zero\n\nFirst block.\n\n**Rooms:**\n- Room\n"), filename_stem="block_0"
-    )
-    FilesystemBlockStorage(settings.blocks_path).save(
-        Block(id="", body="## Block One\n\nSecond block.\n\n**Rooms:**\n- Room\n"), filename_stem="block_1"
-    )
+    # library must exceed max(top_n, required_count) or narrowing is skipped entirely
+    settings.behavior.compose.keyword_search_top_n = 1
+    for i in range(5):
+        FilesystemBlockStorage(settings.blocks_path).save(
+            Block(id="", body=f"## Block {i}\n\nEntry {i}.\n\n**Environment:** Jira\n"), filename_stem=f"block_{i}"
+        )
     client = _client(settings, monkeypatch)
     keywords_reply = "ROLE: \nENVIRONMENT: Jira\nRESPONSIBILITIES: \nDOMAIN: \n"
     plan = json.dumps(

@@ -255,6 +255,7 @@ def test_target_count_detection_call_never_receives_compose_constraints(settings
 
 def test_keyword_extraction_call_includes_the_keywords_tier_constraints_file(settings, fake_router, tmp_path):
     _seed_library(settings)
+    settings.behavior.compose.keyword_search_top_n = 1  # force narrowing to run, not skip
     compose_constraints_file = tmp_path / "COMPOSE_CONSTRAINTS.md"
     compose_constraints_file.write_text("Prefer mutate over generate.", encoding="utf-8")
     settings.path.constraints.compose = str(compose_constraints_file)
@@ -383,26 +384,28 @@ def test_cancel_check_mid_plan_keeps_earlier_slots_resolved(settings, fake_route
     assert outcome.content is None
 
 
-def test_small_library_still_extracts_keywords_and_narrows(settings, fake_router):
-    _seed_library(settings)  # 2 blocks -- narrowing runs regardless of library size
-    unparseable_keywords_reply = "I cannot help with that."
+def test_small_library_skips_narrowing_and_still_composes(settings, fake_router):
+    _seed_library(settings)  # 2 blocks, well within the default top_n -- narrowing is skipped
     plan = json.dumps({"steps": [{"order": 1, "action": "use", "block_id": "school", "criteria": None}]})
-    client = FakeLLMClient(replies=["NONE", unparseable_keywords_reply, plan, "school_result"])
+    client = FakeLLMClient(replies=["NONE", plan, "school_result"])
     fake_router(compose_module, client)
 
     events: list[ProgressEvent] = []
     compose_module.run_compose("need a school", settings=settings, on_progress=events.append)
 
     joined = "\n".join(e.message for e in events)
-    assert "Extracting search keywords" in joined
+    assert "Extracting search keywords" not in joined
+    assert "All 2 candidate(s) already fit within the window" in joined
     assert "Planning against 2 block(s)" in joined
-    # target-count detection + keyword-extraction call + planning call + result-naming call
-    assert client.call_count == 4
+    assert any(e.kind == "narrowing_skipped" for e in events)
+    # target-count detection + planning call + result-naming call -- no keyword-extraction call
+    assert client.call_count == 3
 
 
 def test_keyword_extraction_narrows_the_catalog(settings, fake_router):
     settings.llm.models.naming = "fakeprov:naming-model"
     settings.llm.models.keywords = "fakeprov:keywords-model"
+    settings.behavior.compose.keyword_search_top_n = 4  # below library size -- forces narrowing, not skip
     _seed_large_library(settings, count=5)
     keywords_reply = "ROLE: \nENVIRONMENT: Jira\nRESPONSIBILITIES: \nDOMAIN: \n"
     plan = json.dumps({"steps": [{"order": 1, "action": "use", "block_id": "block_0", "criteria": None}]})
@@ -414,7 +417,7 @@ def test_keyword_extraction_narrows_the_catalog(settings, fake_router):
 
     joined = "\n".join(e.message for e in events)
     assert "Extracting search keywords" in joined
-    assert "Narrowed to 5 of 5 block(s)" in joined  # all 5 share the matched keyword
+    assert "Narrowed to 4 of 5 block(s)" in joined  # top_n=4 caps the 5 equally-matched blocks
     # target-count detection + keyword-extraction call + planning call + result-naming call
     assert client.call_count == 4
     # the planning call's catalog must carry each block's full body, not a truncated preview
@@ -453,6 +456,7 @@ def test_naming_collision_and_target_count_stay_on_the_naming_model(settings, fa
 
 
 def test_narrowing_top_n_is_identical_regardless_of_a_number_in_the_request(settings, fake_router):
+    settings.behavior.compose.keyword_search_top_n = 3  # below library size -- forces narrowing, not skip
     _seed_large_library(settings, count=6)
     keywords_reply = "ROLE: \nENVIRONMENT: Jira\nRESPONSIBILITIES: \nDOMAIN: \n"
     # two "use" steps so the "with number" run's required_count=2 needs no corrective retry
@@ -486,10 +490,11 @@ def test_narrowing_top_n_is_identical_regardless_of_a_number_in_the_request(sett
         e.message for e in events_without_number if e.kind == "narrowing_done" and "Narrowed to" in e.message
     )
     assert narrowed_with == narrowed_without
-    assert "Narrowed to 6 of 6 block(s)" in narrowed_with
+    assert "Narrowed to 3 of 6 block(s)" in narrowed_with
 
 
 def test_degenerate_keyword_reply_falls_back_to_the_full_catalog(settings, fake_router):
+    settings.behavior.compose.keyword_search_top_n = 4  # below library size -- forces narrowing, not skip
     _seed_large_library(settings, count=5)
     unparseable_keywords_reply = "I cannot help with that."
     plan = json.dumps({"steps": [{"order": 1, "action": "use", "block_id": "block_0", "criteria": None}]})
@@ -1017,6 +1022,118 @@ def test_restrict_generate_conflicts_with_pinned_generate(settings, fake_router)
         )
 
 
+def test_from_block_ids_restricts_the_candidate_pool_and_catalog(settings, fake_router):
+    _seed_large_library(settings, count=5)
+    plan = json.dumps({"steps": [{"order": 1, "action": "use", "block_id": "block_0", "criteria": None}]})
+    unparseable_keywords_reply = "I cannot help with that."
+    client = FakeLLMClient(replies=[unparseable_keywords_reply, plan, "result_name"])
+    fake_router(compose_module, client)
+
+    outcome = compose_module.run_compose(
+        "need one project", settings=settings, count=1, from_block_ids=["block_0", "block_1"]
+    )
+
+    assert outcome.slots[-1].block_id == "block_0"
+    planning_message = client.calls[1]["messages"][1]["content"]
+    assert "block_0" in planning_message and "block_1" in planning_message
+    assert "block_2" not in planning_message
+    assert "block_3" not in planning_message
+    assert "block_4" not in planning_message
+
+
+def test_from_block_ids_unresolvable_id_raises_before_any_llm_call(settings, fake_router):
+    _seed_library(settings)
+    client = FakeLLMClient()
+    fake_router(compose_module, client)
+
+    with pytest.raises(BlockNotFoundError):
+        compose_module.run_compose(
+            "need one project", settings=settings, count=1, from_block_ids=["does-not-exist"]
+        )
+    assert client.call_count == 0
+
+
+def test_from_block_ids_empty_list_is_rejected_before_any_llm_call(settings, fake_router):
+    _seed_library(settings)
+    client = FakeLLMClient()
+    fake_router(compose_module, client)
+
+    with pytest.raises(BlockValidationError):
+        compose_module.run_compose("need one project", settings=settings, count=1, from_block_ids=[])
+    assert client.call_count == 0
+
+
+def test_from_block_ids_still_permits_mutation_when_not_restricted(settings, fake_router):
+    _seed_library(settings)
+    plan = json.dumps(
+        {
+            "steps": [
+                {
+                    "order": 1,
+                    "action": "mutate",
+                    "block_id": "police_station",
+                    "criteria": "re-theme as sheriff",
+                }
+            ]
+        }
+    )
+    mutate_reply = (
+        "===BODY===\n## Sheriff Station\n\nFrontier law.\n\n**Rooms:**\n- Office\n"
+        "===LABEL===\nSheriff Station"
+    )
+    unparseable_keywords_reply = "I cannot help with that."
+    client = FakeLLMClient(replies=[unparseable_keywords_reply, plan, mutate_reply, "law_enforcement_setup"])
+    fake_router(compose_module, client)
+    fake_router(mutate_module, client)
+
+    outcome = compose_module.run_compose(
+        "need law enforcement", settings=settings, count=1, from_block_ids=["school", "police_station"]
+    )
+
+    assert outcome.slots[0].action == "mutate"
+    assert outcome.slots[0].resolved_id == "sheriff_station"
+
+
+def test_use_id_within_from_block_ids_composes_with_it_pinned(settings, fake_router):
+    _seed_library(settings)
+    client = FakeLLMClient(replies=["result_name"])
+    fake_router(compose_module, client)
+
+    outcome = compose_module.run_compose(
+        "", settings=settings, use_ids=["school"], from_block_ids=["school", "police_station"]
+    )
+
+    assert outcome.slots[0].action == "pinned_use"
+    assert outcome.slots[0].block_id == "school"
+
+
+def test_use_id_outside_from_block_ids_is_rejected_before_any_work(settings, fake_router):
+    store = _seed_library(settings)
+    store.save(
+        Block(id="", body="## Hospital\n\nTreats patients.\n\n**Rooms:**\n- Ward\n"),
+        filename_stem="hospital",
+    )
+    client = FakeLLMClient()
+    fake_router(compose_module, client)
+
+    with pytest.raises(BlockValidationError):
+        compose_module.run_compose(
+            "", settings=settings, use_ids=["hospital"], from_block_ids=["school", "police_station"]
+        )
+    assert client.call_count == 0
+
+
+def test_use_id_validation_unchanged_without_from_block_ids(settings, fake_router):
+    _seed_library(settings)
+    client = FakeLLMClient(replies=["result_name"])
+    fake_router(compose_module, client)
+
+    outcome = compose_module.run_compose("", settings=settings, use_ids=["school"])
+
+    assert outcome.slots[0].action == "pinned_use"
+    assert outcome.slots[0].block_id == "school"
+
+
 def test_hard_rejection_when_target_exceeds_raw_library_size(settings, fake_router):
     _seed_large_library(settings, count=3)
     client = FakeLLMClient(replies=[])
@@ -1146,3 +1263,168 @@ def test_no_warning_when_configured_top_n_already_suffices(settings, fake_router
 
     assert len(outcome.slots) == 4
     assert not any(e.kind == "warning" for e in events)
+
+
+def test_hard_rejection_when_target_exceeds_designated_set_size(settings, fake_router):
+    _seed_large_library(settings, count=5)
+    client = FakeLLMClient(replies=[])
+    fake_router(compose_module, client)
+
+    with pytest.raises(BlockValidationError):
+        compose_module.run_compose(
+            "",
+            settings=settings,
+            use_ids=["block_0"],
+            count=3,
+            from_block_ids=["block_0", "block_1"],
+        )
+    assert client.call_count == 0
+
+
+def test_hard_rejection_does_not_fire_without_from_block_ids_when_unrestricted(settings, fake_router):
+    _seed_large_library(settings, count=3)
+    plan = json.dumps(
+        {
+            "steps": [
+                {"order": 1, "action": "use", "block_id": "block_0", "criteria": None},
+                {"order": 2, "action": "generate", "block_id": None, "criteria": "extra one"},
+                {"order": 3, "action": "generate", "block_id": None, "criteria": "extra two"},
+                {"order": 4, "action": "generate", "block_id": None, "criteria": "extra three"},
+                {"order": 5, "action": "generate", "block_id": None, "criteria": "extra four"},
+            ]
+        }
+    )
+    unparseable_keywords_reply = "I cannot help with that."
+    client = FakeLLMClient(replies=[unparseable_keywords_reply, plan])
+    fake_router(compose_module, client)
+
+    outcome = compose_module.run_compose(
+        "need five projects", settings=settings, count=5, from_block_ids=None, dry_run=True
+    )
+
+    assert len(outcome.slots) == 5
+
+
+def test_warning_widens_narrowing_window_scoped_to_designated_set(settings, fake_router):
+    settings.behavior.compose.keyword_search_top_n = 2
+    _seed_large_library(settings, count=5)
+    keywords_reply = "ROLE: \nENVIRONMENT: Jira\nRESPONSIBILITIES: \nDOMAIN: \n"
+    plan = json.dumps(
+        {
+            "steps": [
+                {"order": 1, "action": "use", "block_id": "block_0", "criteria": None},
+                {"order": 2, "action": "use", "block_id": "block_1", "criteria": None},
+                {"order": 3, "action": "use", "block_id": "block_2", "criteria": None},
+                {"order": 4, "action": "use", "block_id": "block_3", "criteria": None},
+            ]
+        }
+    )
+    client = FakeLLMClient(replies=[keywords_reply, plan])
+    fake_router(compose_module, client)
+    events: list[ProgressEvent] = []
+
+    outcome = compose_module.run_compose(
+        "need four projects",
+        settings=settings,
+        count=4,
+        # designated set (5) exceeds max(top_n, required_count)=4, so narrowing runs (not skipped)
+        from_block_ids=["block_0", "block_1", "block_2", "block_3", "block_4"],
+        dry_run=True,
+        on_progress=events.append,
+    )
+
+    assert len(outcome.slots) == 4
+    warnings = [e for e in events if e.kind == "warning"]
+    assert warnings
+    assert "designated set" in warnings[0].message
+
+
+def test_from_block_ids_small_set_skips_narrowing(settings, fake_router):
+    _seed_large_library(settings, count=5)
+    plan = json.dumps(
+        {
+            "steps": [
+                {"order": 1, "action": "use", "block_id": "block_0", "criteria": None},
+                {"order": 2, "action": "use", "block_id": "block_1", "criteria": None},
+            ]
+        }
+    )
+    client = FakeLLMClient(replies=[plan])
+    fake_router(compose_module, client)
+    events: list[ProgressEvent] = []
+
+    outcome = compose_module.run_compose(
+        "need two projects",
+        settings=settings,
+        count=2,
+        from_block_ids=["block_0", "block_1"],
+        dry_run=True,
+        on_progress=events.append,
+    )
+
+    assert len(outcome.slots) == 2
+    assert client.call_count == 1  # only the planning call -- no keyword-extraction call
+    assert any(e.kind == "narrowing_skipped" for e in events)
+    assert "Extracting search keywords" not in "\n".join(e.message for e in events)
+
+
+def test_required_count_alone_triggers_skip_when_it_covers_the_pool(settings, fake_router):
+    """Pool (4) exceeds top_n (1) but the still-required count (4) alone makes it fit --
+    the skip threshold is max(top_n, required_count), not top_n alone."""
+    settings.behavior.compose.keyword_search_top_n = 1
+    _seed_large_library(settings, count=4)
+    plan = json.dumps(
+        {
+            "steps": [
+                {"order": 1, "action": "use", "block_id": "block_0", "criteria": None},
+                {"order": 2, "action": "use", "block_id": "block_1", "criteria": None},
+                {"order": 3, "action": "use", "block_id": "block_2", "criteria": None},
+                {"order": 4, "action": "use", "block_id": "block_3", "criteria": None},
+            ]
+        }
+    )
+    client = FakeLLMClient(replies=[plan])
+    fake_router(compose_module, client)
+    events: list[ProgressEvent] = []
+
+    outcome = compose_module.run_compose(
+        "need four projects", settings=settings, count=4, dry_run=True, on_progress=events.append
+    )
+
+    assert len(outcome.slots) == 4
+    assert client.call_count == 1  # no keyword-extraction call
+    assert any(e.kind == "narrowing_skipped" for e in events)
+
+
+def test_required_count_alone_insufficient_when_pool_exceeds_it(settings, fake_router):
+    """Pool (6) exceeds max(top_n=1, required_count=4)=4 -- narrowing runs (not skipped) and
+    then widens+warns exactly as it would without the from_block_ids/skip features."""
+    settings.behavior.compose.keyword_search_top_n = 1
+    _seed_large_library(settings, count=6)
+    keywords_reply = "ROLE: \nENVIRONMENT: Jira\nRESPONSIBILITIES: \nDOMAIN: \n"
+    plan = json.dumps(
+        {
+            "steps": [
+                {"order": 1, "action": "use", "block_id": "block_0", "criteria": None},
+                {"order": 2, "action": "use", "block_id": "block_1", "criteria": None},
+                {"order": 3, "action": "use", "block_id": "block_2", "criteria": None},
+                {"order": 4, "action": "use", "block_id": "block_3", "criteria": None},
+            ]
+        }
+    )
+    client = FakeLLMClient(replies=[keywords_reply, plan])
+    fake_router(compose_module, client)
+    events: list[ProgressEvent] = []
+
+    outcome = compose_module.run_compose(
+        "need four projects",
+        settings=settings,
+        count=4,
+        restrict_generate=True,
+        dry_run=True,
+        on_progress=events.append,
+    )
+
+    assert len(outcome.slots) == 4
+    assert not any(e.kind == "narrowing_skipped" for e in events)
+    assert any(e.kind == "warning" for e in events)

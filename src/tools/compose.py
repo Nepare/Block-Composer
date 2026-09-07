@@ -57,9 +57,22 @@ def _select_candidate_blocks(
     progress: ProgressSink,
     restrict_generate: bool = False,
     required_count: int | None = None,
+    pool_override: list[Block] | None = None,
 ) -> list[Block]:
     """Narrows the block library to the blocks matching keywords extracted from the request."""
-    blocks = [b for b in store.all() if b.id not in exclude_ids]
+    blocks = [b for b in (pool_override if pool_override is not None else store.all()) if b.id not in exclude_ids]
+
+    top_n = settings.behavior.compose.keyword_search_top_n
+    unmatched_reserve = settings.behavior.compose.keyword_search_unmatched_reserve
+    effective_threshold = max(top_n, required_count or 0)
+    if len(blocks) <= effective_threshold:
+        progress(
+            ProgressEvent(
+                kind="narrowing_skipped",
+                message=f"All {len(blocks)} candidate(s) already fit within the window — skipping relevance narrowing",
+            )
+        )
+        return blocks
 
     keywords_client, keywords_model = get_client_and_model(
         settings.llm.models.keywords, settings, on_progress=progress
@@ -94,15 +107,14 @@ def _select_candidate_blocks(
             ),
         )
     )
-    top_n = settings.behavior.compose.keyword_search_top_n
-    unmatched_reserve = settings.behavior.compose.keyword_search_unmatched_reserve
     if restrict_generate and required_count is not None and top_n < required_count:
+        source_desc = "the designated set" if pool_override is not None else "the library"
         progress(
             ProgressEvent(
                 kind="warning",
                 message=(
                     f"--restrict-generate: narrowing window ({top_n}) is smaller than the "
-                    f"{required_count} project(s) still needed — widening to {required_count}."
+                    f"{required_count} project(s) still needed from {source_desc} — widening to {required_count}."
                 ),
             )
         )
@@ -140,10 +152,18 @@ def _plan_with_llm(
     required_count: int | None = None,
     restrict_generate: bool = False,
     restrict_mutate: bool = False,
+    pool_override: list[Block] | None = None,
 ) -> list[ComposeSlot]:
     client, model = get_client_and_model(model_spec or settings.llm.models.compose, settings, on_progress=progress)
     candidate_blocks = _select_candidate_blocks(
-        request, store, pinned_ids, settings, progress, restrict_generate=restrict_generate, required_count=required_count
+        request,
+        store,
+        pinned_ids,
+        settings,
+        progress,
+        restrict_generate=restrict_generate,
+        required_count=required_count,
+        pool_override=pool_override,
     )
     catalog = _catalog(candidate_blocks)
     pinned_note = (
@@ -298,6 +318,7 @@ def run_compose(
     cancel_check: Callable[[], bool] | None = None,
     restrict_generate: bool = False,
     restrict_mutate: bool = False,
+    from_block_ids: list[str] | None = None,
 ) -> ComposeOutcome:
     """`cancel_check`, if given, is polled between slots — a True stops execution before the
     next slot, keeping any blocks/mutations already produced but skipping the final result."""
@@ -324,6 +345,21 @@ def run_compose(
     for uid in use_ids:
         store.load(uid)  # raises BlockNotFoundError early if a pinned id doesn't exist
 
+    resolved_pool: list[Block] | None = None
+    if from_block_ids is not None:
+        if len(from_block_ids) == 0:
+            raise BlockValidationError("--from-blocks: at least one block must be designated.")
+        deduped_from_block_ids = list(dict.fromkeys(from_block_ids))
+        resolved_pool = [store.load(bid) for bid in deduped_from_block_ids]
+        missing_from_set = [uid for uid in use_ids if uid not in deduped_from_block_ids]
+        if missing_from_set:
+            raise BlockValidationError(
+                f"--use id(s) not in --from-blocks: {', '.join(missing_from_set)} — every "
+                "guaranteed inclusion must be part of the designated set."
+            )
+    effective_restrict_generate = restrict_generate or (from_block_ids is not None)
+    pool_size = len(resolved_pool) if from_block_ids is not None else len(store.all())
+
     pinned_use_slots = [
         ComposeSlot(order=i + 1, action="pinned_use", block_id=uid, criteria=None, resolved_id=uid)
         for i, uid in enumerate(use_ids)
@@ -342,10 +378,11 @@ def run_compose(
         naming_client, naming_model = get_client_and_model(settings.llm.models.naming, settings, on_progress=progress)
         target_count = extract_target_count(request, naming_client, naming_model)
 
-    if restrict_generate and target_count is not None and target_count > len(store.all()):
+    if effective_restrict_generate and target_count is not None and target_count > pool_size:
+        source_desc = "the designated set" if from_block_ids is not None else "the library"
         raise BlockValidationError(
-            f"--restrict-generate: requested {target_count} project(s), but the library only "
-            f"has {len(store.all())} block(s) available."
+            f"--restrict-generate: requested {target_count} project(s), but {source_desc} only "
+            f"has {pool_size} block(s) available."
         )
 
     required_planned: int | None = None
@@ -363,8 +400,9 @@ def run_compose(
                 model_spec,
                 progress,
                 required_count=required_planned,
-                restrict_generate=restrict_generate,
+                restrict_generate=effective_restrict_generate,
                 restrict_mutate=restrict_mutate,
+                pool_override=resolved_pool,
             )
     elif request.strip():
         planned_slots = _plan_with_llm(
@@ -374,8 +412,9 @@ def run_compose(
             settings,
             model_spec,
             progress,
-            restrict_generate=restrict_generate,
+            restrict_generate=effective_restrict_generate,
             restrict_mutate=restrict_mutate,
+            pool_override=resolved_pool,
         )
     if planned_slots:
         for i, slot in enumerate(planned_slots):
