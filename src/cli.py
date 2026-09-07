@@ -194,9 +194,7 @@ def compose(
     request_file: Optional[Path] = typer.Option(
         None, "--request-file", "-f", help="Read the composition request from a UTF-8 .txt/.md file."
     ),
-    use: list[str] = typer.Option([], "--use"),
     from_blocks: Optional[list[str]] = typer.Option(None, "--from-blocks"),
-    generate_: list[str] = typer.Option([], "--generate"),
     out: Optional[Path] = typer.Option(None, "--out"),
     model: Optional[str] = typer.Option(None, "--model"),
     name: Optional[str] = typer.Option(None, "--name"),
@@ -220,9 +218,7 @@ def compose(
         outcome = compose_module.run_compose(
             request_text,
             settings=settings,
-            use_ids=use,
             from_block_ids=from_blocks,
-            generate_criteria=generate_,
             out_path=out,
             model_spec=model,
             name=name,
@@ -357,8 +353,6 @@ def results_show(result_id: str = typer.Argument(...)):
         raise typer.Exit(1)
     console.print(escape(result.content))
     console.print(f"\n[bold]Request:[/bold] {escape(result.request or '(none)')}")
-    console.print(f"[bold]Use ids:[/bold] {escape(', '.join(result.use_ids) or '(none)')}")
-    console.print(f"[bold]Generate criteria:[/bold] {escape(', '.join(result.generate_criteria) or '(none)')}")
     console.print(f"[bold]Slots:[/bold] {escape(str(result.slots)) if result.slots else '(none)'}")
     console.print(f"[bold]Preserved:[/bold] {result.preserved}")
 

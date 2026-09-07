@@ -209,8 +209,6 @@ def test_result_save_persists_the_full_result_not_just_content(db_path):
         content="## School\n\nTeaches children.\n",
         name="School Overview",
         request="need a school",
-        use_ids=["school"],
-        generate_criteria=[],
         slots=[{"order": 1, "action": "use", "block_id": "school", "criteria": None, "resolved_id": "school"}],
     )
 
@@ -219,7 +217,6 @@ def test_result_save_persists_the_full_result_not_just_content(db_path):
     loaded = store.load(stem)
     assert loaded.content == "## School\n\nTeaches children.\n"
     assert loaded.request == "need a school"
-    assert loaded.use_ids == ["school"]
     assert loaded.slots == [
         {"order": 1, "action": "use", "block_id": "school", "criteria": None, "resolved_id": "school"}
     ]

@@ -213,8 +213,6 @@ def test_result_save_and_load_roundtrip_preserves_compose_context(tmp_path):
         content="## School\n\nTeaches children.\n",
         name="School Overview",
         request="need a school",
-        use_ids=["school"],
-        generate_criteria=["a barn"],
         slots=[
             {
                 "order": 1,
@@ -230,8 +228,6 @@ def test_result_save_and_load_roundtrip_preserves_compose_context(tmp_path):
     loaded = store.load(stem)
 
     assert loaded.request == "need a school"
-    assert loaded.use_ids == ["school"]
-    assert loaded.generate_criteria == ["a barn"]
     assert loaded.slots == [
         {
             "order": 1,
@@ -253,8 +249,6 @@ def test_hand_authored_result_gets_sane_defaults(tmp_path):
 
     assert "Just a body" in result.content
     assert result.request == ""
-    assert result.use_ids == []
-    assert result.generate_criteria == []
     assert result.slots == []
 
 

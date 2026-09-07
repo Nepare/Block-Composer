@@ -281,26 +281,11 @@ def test_compose_start_rejects_all_empty(settings, monkeypatch):
     response = client.post(
         "/compose/start",
         params={"key": "test-key"},
-        json={"request": "", "specifiers": "", "use_ids": [], "generate_criteria": []},
+        json={"request": "", "specifiers": ""},
     )
 
     assert response.status_code == 400
-    assert response.text == (
-        "compose needs a request, specifiers, use_ids, or generate_criteria — "
-        "nothing to do with all empty."
-    )
-    assert len(web_jobs._jobs) == jobs_before
-
-
-def test_compose_start_rejects_unknown_use_id(settings, monkeypatch):
-    client = _client(settings, monkeypatch)
-    jobs_before = len(web_jobs._jobs)
-
-    response = client.post(
-        "/compose/start", params={"key": "test-key"}, json={"use_ids": ["does-not-exist"]}
-    )
-
-    assert response.status_code == 400
+    assert response.text == "compose needs a request or specifiers — nothing to do with both empty."
     assert len(web_jobs._jobs) == jobs_before
 
 
@@ -316,7 +301,7 @@ def test_compose_start_rejects_non_positive_count(settings, monkeypatch):
         response = client.post(
             "/compose/start",
             params={"key": "test-key"},
-            json={"use_ids": ["school"], "count": count},
+            json={"request": "need a school", "count": count},
         )
         assert response.status_code == 400
         assert response.text == f"count must be a positive integer, got {count}."
@@ -327,7 +312,7 @@ def test_compose_start_rejects_missing_key(settings, monkeypatch):
     client = _client(settings, monkeypatch)
     jobs_before = len(web_jobs._jobs)
 
-    response = client.post("/compose/start", json={"use_ids": []})
+    response = client.post("/compose/start", json={})
 
     assert response.status_code == 422
     assert len(web_jobs._jobs) == jobs_before
@@ -342,7 +327,7 @@ def test_compose_start_rejects_wrong_key(settings, monkeypatch):
     jobs_before = len(web_jobs._jobs)
 
     response = client.post(
-        "/compose/start", params={"key": "wrong-key"}, json={"use_ids": ["school"]}
+        "/compose/start", params={"key": "wrong-key"}, json={"request": "need a school"}
     )
 
     assert response.status_code == 401
@@ -425,8 +410,11 @@ def test_cancel_rejected_for_already_finished_job(settings, monkeypatch, fake_ro
         filename_stem="school",
     )
     client = _client(settings, monkeypatch)
-    fake_router(compose_module, FakeLLMClient(replies=["school_result"]))
-    start = client.post("/compose/start", params={"key": "test-key"}, json={"use_ids": ["school"]})
+    plan = json.dumps({"steps": [{"order": 1, "action": "use", "block_id": "school", "criteria": None}]})
+    fake_router(compose_module, FakeLLMClient(replies=["NONE", plan, "school_result"]))
+    start = client.post(
+        "/compose/start", params={"key": "test-key"}, json={"request": "need a school"}
+    )
     job_id = start.json()["job_id"]
     _wait_for_job(job_id)
 
@@ -863,8 +851,11 @@ def test_stream_and_cancel_behave_consistently_across_all_four_tools(settings, m
         Block(id="", body="## School\n\nTeaches children.\n\n**Rooms:**\n- Classroom\n"),
         filename_stem="school",
     )
-    fake_router(compose_module, FakeLLMClient(replies=["school_result"]))
-    comp_start = client.post("/compose/start", params={"key": "test-key"}, json={"use_ids": ["school"]})
+    plan = json.dumps({"steps": [{"order": 1, "action": "use", "block_id": "school", "criteria": None}]})
+    fake_router(compose_module, FakeLLMClient(replies=["NONE", plan, "school_result"]))
+    comp_start = client.post(
+        "/compose/start", params={"key": "test-key"}, json={"request": "need a school"}
+    )
     comp_job_id = comp_start.json()["job_id"]
     _wait_for_job(comp_job_id)
 
@@ -1028,8 +1019,6 @@ def test_results_get_returns_full_content_and_inputs(settings, monkeypatch):
             content="A quiet outpost.",
             name="Quiet Outpost",
             request="a small outpost",
-            use_ids=["sheriff_outpost"],
-            generate_criteria=["a trading post"],
             slots=[{"order": 1, "action": "use", "block_id": "sheriff_outpost"}],
         ),
         filename_stem="quiet_outpost",
@@ -1042,8 +1031,6 @@ def test_results_get_returns_full_content_and_inputs(settings, monkeypatch):
     body = response.json()
     assert body["id"] == "quiet_outpost"
     assert body["content"] == "A quiet outpost."
-    assert body["use_ids"] == ["sheriff_outpost"]
-    assert body["generate_criteria"] == ["a trading post"]
     assert body["slots"] == [{"order": 1, "action": "use", "block_id": "sheriff_outpost"}]
 
 
@@ -1134,7 +1121,6 @@ def test_blocks_delete_leaves_referencing_result_untouched(settings, monkeypatch
             content="A quiet outpost.",
             name="Quiet Outpost",
             request="a small outpost",
-            use_ids=["sheriff_outpost"],
         ),
         filename_stem="quiet_outpost",
     )
@@ -1145,7 +1131,7 @@ def test_blocks_delete_leaves_referencing_result_untouched(settings, monkeypatch
     assert response.status_code == 200
     still_there = client.get("/results/quiet_outpost", params={"key": "test-key"})
     assert still_there.status_code == 200
-    assert still_there.json()["use_ids"] == ["sheriff_outpost"]
+    assert still_there.json()["content"] == "A quiet outpost."
 
 
 def test_blocks_delete_rejects_missing_key(settings, monkeypatch):
@@ -1722,7 +1708,7 @@ def test_compose_start_threads_explicit_name_into_run_compose(settings, monkeypa
     response = client.post(
         "/compose/start",
         params={"key": "test-key"},
-        json={"use_ids": ["school"], "name": "My Result"},
+        json={"request": "need a school", "name": "My Result"},
     )
 
     assert response.status_code == 200
@@ -1778,17 +1764,19 @@ def test_mutate_start_with_preserve_true_saves_preserved_block(settings, monkeyp
     assert fetched.json()["preserved"] is True
 
 
-def test_compose_start_with_preserve_true_saves_preserved_result(settings, monkeypatch):
+def test_compose_start_with_preserve_true_saves_preserved_result(settings, monkeypatch, fake_router):
     FilesystemBlockStorage(settings.blocks_path).save(
         Block(id="", body="## School\n\nTeaches children.\n\n**Rooms:**\n- Classroom\n"),
         filename_stem="school",
     )
     client = _client(settings, monkeypatch)
+    plan = json.dumps({"steps": [{"order": 1, "action": "use", "block_id": "school", "criteria": None}]})
+    fake_router(compose_module, FakeLLMClient(replies=["NONE", plan]))
 
     response = client.post(
         "/compose/start",
         params={"key": "test-key"},
-        json={"use_ids": ["school"], "name": "My Result", "preserve": True},
+        json={"request": "need a school", "name": "My Result", "preserve": True},
     )
 
     assert response.status_code == 200

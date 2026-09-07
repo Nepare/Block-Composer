@@ -102,7 +102,6 @@ def _compose_system(allow_mutate: bool, allow_generate: bool) -> str:
 def compose_prompt(
     request: str,
     catalog: list[dict],
-    pinned_note: str,
     constraints: str = "",
     required_count: int | None = None,
     allow_mutate: bool = True,
@@ -112,8 +111,6 @@ def compose_prompt(
         f"### {b['id']} (tags: {', '.join(b['tags'])})\n{b['body']}" for b in catalog
     )
     user = f"Request: {request}\n\nAvailable blocks:\n{catalog_text or '(none)'}"
-    if pinned_note:
-        user += f"\n\n{pinned_note}"
     if required_count is not None:
         user += f"\n\nYour plan's \"steps\" list MUST contain exactly {required_count} entries — no more, no fewer."
     return [

@@ -26,7 +26,7 @@ def test_mutate_prompt_appends_constraints_to_system_message():
 
 
 def test_compose_prompt_appends_constraints_to_system_message():
-    messages = compose_prompt("a request", [], "", constraints="Prefer mutate over generate.")
+    messages = compose_prompt("a request", [], constraints="Prefer mutate over generate.")
     assert "Prefer mutate over generate." in messages[0]["content"]
 
 

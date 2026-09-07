@@ -104,8 +104,6 @@ class DissectStartRequest(BaseModel):
 class ComposeStartRequest(BaseModel):
     request: str = ""
     specifiers: str = ""
-    use_ids: list[str] = []
-    generate_criteria: list[str] = []
     count: int | None = None
     model: str | None = None
     max_generate: int | None = None
@@ -204,8 +202,6 @@ class ResultDetail(BaseModel):
     request: str
     created_at: datetime | None
     content: str
-    use_ids: list[str]
-    generate_criteria: list[str]
     slots: list[dict]
     preserved: bool
 
@@ -217,8 +213,6 @@ class ResultDetail(BaseModel):
             request=result.request,
             created_at=result.created_at,
             content=result.content,
-            use_ids=result.use_ids,
-            generate_criteria=result.generate_criteria,
             slots=result.slots,
             preserved=result.preserved,
         )
@@ -356,28 +350,14 @@ def compose_start(payload: ComposeStartRequest, key: str):
     else:
         merged_request = request
 
-    store = get_block_storage(settings)
-    try:
-        for uid in payload.use_ids:
-            store.load(uid)
-    except CvdocsError as exc:
-        return PlainTextResponse(str(exc), status_code=400)
-
-    if not merged_request and not payload.use_ids and not payload.generate_criteria:
+    if not merged_request:
         return PlainTextResponse(
-            "compose needs a request, specifiers, use_ids, or generate_criteria — nothing to do with all empty.",
+            "compose needs a request or specifiers — nothing to do with both empty.",
             status_code=400,
         )
 
     if payload.count is not None and payload.count <= 0:
         return PlainTextResponse(f"count must be a positive integer, got {payload.count}.", status_code=400)
-
-    if payload.restrict_generate and payload.generate_criteria:
-        return PlainTextResponse(
-            "restrict_generate cannot be combined with generate_criteria (a pinned new-block "
-            "request) — these directly contradict each other.",
-            status_code=400,
-        )
 
     if payload.name is not None:
         try:
@@ -389,8 +369,6 @@ def compose_start(payload: ComposeStartRequest, key: str):
         outcome = compose_module.run_compose(
             merged_request,
             settings=settings,
-            use_ids=payload.use_ids,
-            generate_criteria=payload.generate_criteria,
             count=payload.count,
             model_spec=payload.model,
             max_generate=payload.max_generate if payload.max_generate is not None else 8,

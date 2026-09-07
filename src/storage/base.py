@@ -23,8 +23,6 @@ class Result:
     content: str = ""
     name: str = ""
     request: str = ""
-    use_ids: list[str] = field(default_factory=list)
-    generate_criteria: list[str] = field(default_factory=list)
     slots: list[dict] = field(default_factory=list)
     progress_log: list[ProgressEvent] = field(default_factory=list)
     created_at: datetime | None = None
@@ -38,8 +36,6 @@ class Result:
             "id": self.id,
             "name": self.name,
             "request": self.request,
-            "use_ids": self.use_ids,
-            "generate_criteria": self.generate_criteria,
             "slots": self.slots,
             "created_at": (self.created_at or datetime.now(timezone.utc)).isoformat(),
             "preserved": self.preserved,
@@ -63,8 +59,6 @@ class Result:
             content=post.content,
             name=meta.get("name") or default_id,
             request=meta.get("request", ""),
-            use_ids=list(meta.get("use_ids") or []),
-            generate_criteria=list(meta.get("generate_criteria") or []),
             slots=list(meta.get("slots") or []),
             created_at=created_at,
             preserved=bool(meta.get("preserved", False)),

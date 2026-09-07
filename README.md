@@ -188,7 +188,6 @@ cvdocs mutate <block-id> --criteria "<...>" --preserve      # lock the produced 
 
 cvdocs compose "<natural-language request>"            # writes output/results/<name>.md
 cvdocs compose -f request.md                            # ...or read the request from a file
-cvdocs compose "<request>" --use <block-id> --generate "<criteria>"  # pin specific slots
 cvdocs compose "<request>" --dry-run                    # show the plan, write nothing
 cvdocs compose "<request>" --name <name>                # skip the naming call, use this name
 cvdocs compose "<request>" --preserve                    # lock the produced result on creation
@@ -198,7 +197,7 @@ cvdocs compose "<request>" --from-blocks <block-id> --from-blocks <block-id>  # 
 
 cvdocs results list                                    # browse saved compose results
 cvdocs results list --query <text>                     # substring search over name/content
-cvdocs results show <result-id>                        # content + the request/pins/plan behind it
+cvdocs results show <result-id>                        # content + the request/plan behind it
 cvdocs results delete <result-id>                      # permanent — no undo
 cvdocs results preserve <result-id>                    # lock — exempt from `results clear`
 cvdocs results unpreserve <result-id>                  # unlock
@@ -237,9 +236,8 @@ exactly the designated blocks — duplicates collapse silently, an unresolvable 
 whole call up front naming the offending id(s), and an empty set is rejected outright. Brand-new
 content is fully disabled for the call regardless of `--restrict-generate` (a harmless no-op
 alongside it), while mutation of a designated block stays available unless `--restrict-mutate` is
-also passed; designating a block makes it eligible, not mandatory, unless separately pinned via
-`--use`. Every `--use` id must itself be part of the designated set, else the call is rejected
-before any work starts. The feasibility check and narrowing-window widening described above apply
+also passed; designating a block makes it eligible, not mandatory. The feasibility check and
+narrowing-window widening described above apply
 unchanged, scoped to the designated set's size (its raw, unreduced distinct-block count) instead
 of the whole library's. Separately, and also on the plain no-`--from-blocks` path, whenever the
 eligible candidate pool already fits within what compose's own narrowing step would end up
@@ -264,20 +262,19 @@ HTTP, gated by the same `?key=<CVDOCS_API_KEY>` credential as `/auth/google/logi
   `/auth/google/login` flow from [3.2](#32-hosted-deployment-docker) first.
 - `POST /compose/start` — same inputs as the CLI's `compose` command, plus a `specifiers` field
   (a shorter free-text field merged into `request` server-side) — accepts `request`,
-  `specifiers`, `use_ids`, `generate_criteria`, `count` (`null` lets the model decide), `model`,
+  `specifiers`, `count` (`null` lets the model decide), `model`,
   `name` (skip the naming-model call, `_2`/`_3`/... on collision), `preserve` (lock the produced
   result on creation), `max_generate`, `restrict_generate`, `restrict_mutate`, and
   `from_block_ids`; no filesystem output path or dry-run mode over HTTP. `restrict_generate`
   forbids the planner from producing any brand-new block (rejected up front, before any work
   starts, if the library overall can't
   supply enough blocks for the request, naming the shortfall; the candidate-narrowing window is
-  widened automatically with a distinct warning if it's just configured too small) and is
-  rejected outright alongside a non-empty `generate_criteria`; `restrict_mutate` forbids any
-  edited variant of an existing block, so every existing block in the result appears exactly as
-  originally authored. Both default to `false` and may be combined. `from_block_ids`
+  widened automatically with a distinct warning if it's just configured too small); `restrict_mutate`
+  forbids any edited variant of an existing block, so every existing block in the result appears
+  exactly as originally authored. Both default to `false` and may be combined. `from_block_ids`
   (`list[str]`, defaults to `null`/omitted) restricts the candidate pool to exactly the given
   block ids instead of the whole library — same duplicate-collapsing, unresolvable-id rejection,
-  empty-list rejection, `use_ids`-subset requirement, and set-scoped feasibility/widening behavior
+  empty-list rejection, and set-scoped feasibility/widening behavior
   as the CLI's `--from-blocks` (see above); brand-new content is fully disabled for the call
   regardless of `restrict_generate`. Also returns
   `{"job_id": "..."}` immediately. Unlike the other three tools, a compose run is
@@ -319,7 +316,7 @@ none of them return a `job_id` or involve `/stream`:
 - `GET /results` — every saved compose result, each as a summary (`id`, `name`, `request`,
   `created_at`, `preserved`, no `content`); optional `query` (substring over name/content), same
   as `cvdocs results list`.
-- `GET /results/{id}` — one result's full content plus `use_ids`, `generate_criteria`, `slots`,
+- `GET /results/{id}` — one result's full content plus `slots`
   and `preserved`, matching `cvdocs results show`; `404` if the id doesn't exist.
 - `DELETE /results/{id}` — permanently removes a saved result; `404` if the id doesn't exist.
   Works on a preserved result too, same as `DELETE /blocks/{id}`.

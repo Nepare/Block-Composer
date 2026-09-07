@@ -235,8 +235,8 @@ class SqliteBlockStorage:
 
 class SqliteResultStorage:
     """Same behavior/shape as FilesystemResultStorage, backed by a `results` table —
-    but unlike the filesystem backend, the full Result (request/use_ids/generate_criteria/
-    slots/progress_log) is actually persisted here, not just `content`."""
+    but unlike the filesystem backend, the full Result (request/slots/progress_log) is
+    actually persisted here, not just `content`."""
 
     def __init__(self, path: Path | str):
         self.path = Path(path)
@@ -249,8 +249,6 @@ class SqliteResultStorage:
                 content TEXT NOT NULL,
                 name TEXT NOT NULL,
                 request TEXT NOT NULL DEFAULT '',
-                use_ids TEXT NOT NULL DEFAULT '[]',
-                generate_criteria TEXT NOT NULL DEFAULT '[]',
                 slots TEXT NOT NULL DEFAULT '[]',
                 progress_log TEXT NOT NULL DEFAULT '[]',
                 created_at TEXT,
@@ -276,8 +274,6 @@ class SqliteResultStorage:
             content=row["content"],
             name=row["name"],
             request=row["request"],
-            use_ids=json.loads(row["use_ids"]),
-            generate_criteria=json.loads(row["generate_criteria"]),
             slots=json.loads(row["slots"]),
             progress_log=[],  # not populated by any caller yet
             created_at=datetime.fromisoformat(row["created_at"]) if row["created_at"] else None,
@@ -287,12 +283,11 @@ class SqliteResultStorage:
     def _insert(self, result: Result, stem: str) -> None:
         self._conn.execute(
             """
-            INSERT INTO results (id, content, name, request, use_ids, generate_criteria,
-                                  slots, progress_log, created_at, preserved)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO results (id, content, name, request, slots, progress_log,
+                                  created_at, preserved)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 content=excluded.content, name=excluded.name, request=excluded.request,
-                use_ids=excluded.use_ids, generate_criteria=excluded.generate_criteria,
                 slots=excluded.slots, progress_log=excluded.progress_log,
                 created_at=excluded.created_at, preserved=excluded.preserved
             """,
@@ -301,8 +296,6 @@ class SqliteResultStorage:
                 result.content,
                 result.name,
                 result.request,
-                json.dumps(result.use_ids),
-                json.dumps(result.generate_criteria),
                 json.dumps(result.slots),
                 json.dumps([]),  # progress_log isn't populated by any caller yet
                 (result.created_at or datetime.now(timezone.utc)).isoformat(),

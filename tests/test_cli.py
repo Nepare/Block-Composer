@@ -544,8 +544,6 @@ def test_results_show_prints_content_and_request_metadata(cli_settings):
             content="the full result content",
             name="a-result",
             request="aim for 2 backend projects",
-            use_ids=["block-1", "block-2"],
-            generate_criteria=["a rugged frontier outpost"],
         ),
         filename_stem="a-result",
     )
@@ -555,9 +553,6 @@ def test_results_show_prints_content_and_request_metadata(cli_settings):
     assert result.exit_code == 0
     assert "the full result content" in result.output
     assert "aim for 2 backend projects" in result.output
-    assert "block-1" in result.output
-    assert "block-2" in result.output
-    assert "a rugged frontier outpost" in result.output
 
 
 def test_results_show_missing_id_fails(cli_settings):

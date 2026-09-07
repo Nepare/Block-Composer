@@ -21,7 +21,7 @@ from storage.router import get_block_storage, get_result_storage
 @dataclass
 class ComposeSlot:
     order: int
-    action: str  # "use" | "mutate" | "generate" | "pinned_use" | "pinned_generate"
+    action: str  # "use" | "mutate" | "generate"
     block_id: str | None
     criteria: str | None
     resolved_id: str | None = None
@@ -52,7 +52,6 @@ def _next_unused_candidate(candidates: list[Block], claimed_ids: set[str]) -> st
 def _select_candidate_blocks(
     request: str,
     store: BlockStorage,
-    exclude_ids: set[str],
     settings: Settings,
     progress: ProgressSink,
     restrict_generate: bool = False,
@@ -60,7 +59,7 @@ def _select_candidate_blocks(
     pool_override: list[Block] | None = None,
 ) -> list[Block]:
     """Narrows the block library to the blocks matching keywords extracted from the request."""
-    blocks = [b for b in (pool_override if pool_override is not None else store.all()) if b.id not in exclude_ids]
+    blocks = list(pool_override) if pool_override is not None else store.all()
 
     top_n = settings.behavior.compose.keyword_search_top_n
     unmatched_reserve = settings.behavior.compose.keyword_search_unmatched_reserve
@@ -144,7 +143,6 @@ def _parse_plan_reply(reply: str) -> list[dict]:
 def _plan_with_llm(
     request: str,
     store: BlockStorage,
-    pinned_ids: set[str],
     settings: Settings,
     model_spec: str | None,
     progress: ProgressSink,
@@ -158,7 +156,6 @@ def _plan_with_llm(
     candidate_blocks = _select_candidate_blocks(
         request,
         store,
-        pinned_ids,
         settings,
         progress,
         restrict_generate=restrict_generate,
@@ -166,16 +163,10 @@ def _plan_with_llm(
         pool_override=pool_override,
     )
     catalog = _catalog(candidate_blocks)
-    pinned_note = (
-        f"Already pinned/handled by the user, do not repeat these: {', '.join(pinned_ids)}"
-        if pinned_ids
-        else ""
-    )
     compose_constraints = constraints_module.load(settings, "compose")
     messages = compose_prompt(
         request,
         catalog,
-        pinned_note,
         compose_constraints,
         required_count=required_count,
         allow_mutate=not restrict_mutate,
@@ -305,8 +296,6 @@ def run_compose(
     request: str,
     *,
     settings: Settings,
-    use_ids: list[str] | None = None,
-    generate_criteria: list[str] | None = None,
     count: int | None = None,
     out_path: Path | None = None,
     model_spec: str | None = None,
@@ -325,25 +314,12 @@ def run_compose(
     explicit_base = naming.validate_explicit_name(name) if name is not None else None
     progress = on_progress or (lambda _event: None)
     store = get_block_storage(settings)
-    use_ids = use_ids or []
-    generate_criteria = generate_criteria or []
 
-    if not request.strip() and not use_ids and not generate_criteria:
-        raise BlockValidationError(
-            "compose needs a request, --use, or --generate — nothing to do with all three empty."
-        )
+    if not request.strip():
+        raise BlockValidationError("compose needs a request — nothing to do with an empty one.")
 
     if count is not None and count <= 0:
         raise BlockValidationError(f"--count must be a positive integer, got {count}.")
-
-    if restrict_generate and generate_criteria:
-        raise BlockValidationError(
-            "--restrict-generate cannot be combined with --generate (a pinned new-block "
-            "request) — these directly contradict each other."
-        )
-
-    for uid in use_ids:
-        store.load(uid)  # raises BlockNotFoundError early if a pinned id doesn't exist
 
     resolved_pool: list[Block] | None = None
     if from_block_ids is not None:
@@ -351,25 +327,8 @@ def run_compose(
             raise BlockValidationError("--from-blocks: at least one block must be designated.")
         deduped_from_block_ids = list(dict.fromkeys(from_block_ids))
         resolved_pool = [store.load(bid) for bid in deduped_from_block_ids]
-        missing_from_set = [uid for uid in use_ids if uid not in deduped_from_block_ids]
-        if missing_from_set:
-            raise BlockValidationError(
-                f"--use id(s) not in --from-blocks: {', '.join(missing_from_set)} — every "
-                "guaranteed inclusion must be part of the designated set."
-            )
     effective_restrict_generate = restrict_generate or (from_block_ids is not None)
     pool_size = len(resolved_pool) if from_block_ids is not None else len(store.all())
-
-    pinned_use_slots = [
-        ComposeSlot(order=i + 1, action="pinned_use", block_id=uid, criteria=None, resolved_id=uid)
-        for i, uid in enumerate(use_ids)
-    ]
-    pinned_generate_slots = [
-        ComposeSlot(order=len(use_ids) + i + 1, action="pinned_generate", block_id=None, criteria=c)
-        for i, c in enumerate(generate_criteria)
-    ]
-    pinned_slots = pinned_use_slots + pinned_generate_slots
-    total_pinned = len(pinned_slots)
 
     target_count: int | None = None
     if count is not None:
@@ -385,9 +344,7 @@ def run_compose(
             f"has {pool_size} block(s) available."
         )
 
-    required_planned: int | None = None
-    if target_count is not None:
-        required_planned = max(target_count - total_pinned, 0)
+    required_planned = target_count
 
     planned_slots: list[ComposeSlot] = []
     if target_count is not None:
@@ -395,7 +352,6 @@ def run_compose(
             planned_slots = _plan_with_llm(
                 request,
                 store,
-                set(use_ids),
                 settings,
                 model_spec,
                 progress,
@@ -408,7 +364,6 @@ def run_compose(
         planned_slots = _plan_with_llm(
             request,
             store,
-            set(use_ids),
             settings,
             model_spec,
             progress,
@@ -418,11 +373,11 @@ def run_compose(
         )
     if planned_slots:
         for i, slot in enumerate(planned_slots):
-            slot.order = total_pinned + i + 1
+            slot.order = i + 1
 
-    all_slots = pinned_slots + planned_slots
+    all_slots = planned_slots
 
-    generate_calls = sum(1 for s in all_slots if s.action in ("generate", "pinned_generate"))
+    generate_calls = sum(1 for s in all_slots if s.action == "generate")
     if generate_calls > max_generate:
         raise BlockValidationError(
             f"Compose plan needs {generate_calls} new blocks, more than --max-generate={max_generate}."
@@ -454,7 +409,7 @@ def run_compose(
 
     if dry_run:
         for slot in all_slots:
-            if slot.action in ("use", "pinned_use"):
+            if slot.action == "use":
                 slot.resolved_id = slot.block_id
         return ComposeOutcome(
             slots=all_slots, result_path=None, result_id=None, name=None, content=None, cancelled=False
@@ -480,7 +435,7 @@ def run_compose(
                 cancelled=True,
             )
 
-        if slot.action in ("use", "pinned_use"):
+        if slot.action == "use":
             slot.resolved_id = slot.block_id
             progress(ProgressEvent(kind="use", message=f"[{i}/{total}] use -> {slot.block_id}", step=i, total=total))
         elif slot.action == "mutate":
@@ -520,7 +475,7 @@ def run_compose(
                     kind="mutate_done", message=f"[{i}/{total}] mutated -> {slot.resolved_id}", step=i, total=total
                 )
             )
-        elif slot.action in ("generate", "pinned_generate"):
+        elif slot.action == "generate":
             progress(
                 ProgressEvent(kind="generate_start", message=f"[{i}/{total}] generating new block…", step=i, total=total)
             )
@@ -569,8 +524,6 @@ def run_compose(
         out_path,
         progress,
         request=request,
-        use_ids=use_ids,
-        generate_criteria=generate_criteria,
         slots=ordered,
         name=name,
         explicit_base=explicit_base,
@@ -602,8 +555,6 @@ def _save_result(
     progress: ProgressSink,
     *,
     request: str,
-    use_ids: list[str],
-    generate_criteria: list[str],
     slots: list[ComposeSlot],
     name: str | None = None,
     explicit_base: str | None = None,
@@ -621,8 +572,6 @@ def _save_result(
         content=content,
         name=title,
         request=request,
-        use_ids=list(use_ids),
-        generate_criteria=list(generate_criteria),
         slots=[
             {
                 "order": s.order,
