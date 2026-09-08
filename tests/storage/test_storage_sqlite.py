@@ -468,6 +468,21 @@ def test_set_preserved_on_unknown_result_raises(db_path):
         store.set_preserved("nope", True)
 
 
+def test_rename_updates_a_fresh_result_s_name(db_path):
+    store = SqliteResultStorage(db_path)
+    store.save(Result(content="## School\n\nA.\n", name="School"), filename_stem="school")
+
+    store.rename("school", "Renamed School")
+
+    assert store.load("school").name == "Renamed School"
+
+
+def test_rename_on_unknown_result_raises(db_path):
+    store = SqliteResultStorage(db_path)
+    with pytest.raises(BlockNotFoundError):
+        store.rename("nope", "New Name")
+
+
 def test_clear_deletes_unpreserved_results_and_keeps_preserved(db_path):
     store = SqliteResultStorage(db_path)
     store.save(Result(content="## School\n\nA.\n", name="School"), filename_stem="school")

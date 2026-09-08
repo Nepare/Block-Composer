@@ -123,6 +123,11 @@ class FakeResultStorage:
             raise BlockNotFoundError(f"No result {filename_stem!r}")
         self._results[filename_stem].preserved = preserved
 
+    def rename(self, filename_stem, new_name: str) -> None:
+        if filename_stem not in self._results:
+            raise BlockNotFoundError(f"No result {filename_stem!r}")
+        self._results[filename_stem].name = new_name
+
     def clear(self) -> ClearResult:
         to_delete = [stem for stem, r in self._results.items() if not r.preserved]
         for stem in to_delete:

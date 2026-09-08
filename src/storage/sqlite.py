@@ -353,6 +353,23 @@ class SqliteResultStorage:
         else:
             self._conn.execute("COMMIT")
 
+    def rename(self, filename_stem: str, new_name: str) -> None:
+        self._conn.execute("BEGIN")
+        try:
+            cursor = self._conn.execute(
+                "UPDATE results SET name = ? WHERE id = ?", (new_name, filename_stem)
+            )
+            if cursor.rowcount == 0:
+                self._conn.execute("ROLLBACK")
+                raise BlockNotFoundError(f"No result {filename_stem!r} in {self.path}")
+        except BlockNotFoundError:
+            raise
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
+        else:
+            self._conn.execute("COMMIT")
+
     def clear(self) -> ClearResult:
         self._conn.execute("BEGIN")
         try:

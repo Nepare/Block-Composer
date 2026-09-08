@@ -1461,6 +1461,70 @@ def test_results_preserve_rejects_wrong_key(settings, monkeypatch):
     assert response.status_code == 401
 
 
+def test_results_rename_updates_name(settings, monkeypatch):
+    store = FilesystemResultStorage(settings.results_path)
+    store.save(Result(id="", content="A quiet outpost.", name="Quiet Outpost"), filename_stem="quiet_outpost")
+    client = _client(settings, monkeypatch)
+
+    response = client.post("/results/quiet_outpost/rename", params={"key": "test-key"}, json={"name": "Renamed Outpost"})
+
+    assert response.status_code == 200
+    assert response.json() == {"id": "quiet_outpost", "name": "Renamed Outpost"}
+    fetched = client.get("/results/quiet_outpost", params={"key": "test-key"})
+    assert fetched.json()["name"] == "Renamed Outpost"
+    assert fetched.json()["content"] == "A quiet outpost."
+
+
+def test_results_rename_is_reflected_in_list(settings, monkeypatch):
+    store = FilesystemResultStorage(settings.results_path)
+    store.save(Result(id="", content="A quiet outpost.", name="Quiet Outpost"), filename_stem="quiet_outpost")
+    client = _client(settings, monkeypatch)
+
+    client.post("/results/quiet_outpost/rename", params={"key": "test-key"}, json={"name": "Renamed Outpost"})
+
+    listed = client.get("/results", params={"key": "test-key"}).json()
+    by_id = {r["id"]: r for r in listed}
+    assert by_id["quiet_outpost"]["name"] == "Renamed Outpost"
+
+
+def test_results_rename_rejects_unknown_id(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+
+    response = client.post("/results/does-not-exist/rename", params={"key": "test-key"}, json={"name": "New Name"})
+
+    assert response.status_code == 404
+
+
+def test_results_rename_rejects_empty_name(settings, monkeypatch):
+    store = FilesystemResultStorage(settings.results_path)
+    store.save(Result(id="", content="A quiet outpost.", name="Quiet Outpost"), filename_stem="quiet_outpost")
+    client = _client(settings, monkeypatch)
+
+    response = client.post("/results/quiet_outpost/rename", params={"key": "test-key"}, json={"name": "   "})
+
+    assert response.status_code == 400
+
+
+def test_results_rename_rejects_missing_key(settings, monkeypatch):
+    store = FilesystemResultStorage(settings.results_path)
+    store.save(Result(id="", content="A quiet outpost.", name="Quiet Outpost"), filename_stem="quiet_outpost")
+    client = _client(settings, monkeypatch)
+
+    response = client.post("/results/quiet_outpost/rename", json={"name": "New Name"})
+
+    assert response.status_code == 422
+
+
+def test_results_rename_rejects_wrong_key(settings, monkeypatch):
+    store = FilesystemResultStorage(settings.results_path)
+    store.save(Result(id="", content="A quiet outpost.", name="Quiet Outpost"), filename_stem="quiet_outpost")
+    client = _client(settings, monkeypatch)
+
+    response = client.post("/results/quiet_outpost/rename", params={"key": "wrong-key"}, json={"name": "New Name"})
+
+    assert response.status_code == 401
+
+
 def test_results_list_and_get_include_preserved_field(settings, monkeypatch):
     store = FilesystemResultStorage(settings.results_path)
     store.save(Result(id="", content="A quiet outpost.", name="Quiet Outpost"), filename_stem="quiet_outpost")

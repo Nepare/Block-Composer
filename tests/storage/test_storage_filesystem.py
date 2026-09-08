@@ -475,6 +475,33 @@ def test_set_preserved_on_unknown_result_raises(tmp_path):
         store.set_preserved("nope", True)
 
 
+def test_rename_updates_a_fresh_result_s_name(tmp_path):
+    store = FilesystemResultStorage(tmp_path)
+    store.save(Result(content="## School\n\nA.\n", name="School"), filename_stem="school")
+
+    store.rename("school", "Renamed School")
+
+    assert store.load("school").name == "Renamed School"
+
+
+def test_rename_on_unknown_result_raises(tmp_path):
+    store = FilesystemResultStorage(tmp_path)
+    with pytest.raises(BlockNotFoundError):
+        store.rename("nope", "New Name")
+
+
+def test_rename_does_not_move_the_file_on_disk(tmp_path):
+    store = FilesystemResultStorage(tmp_path)
+    store.save(Result(content="## School\n\nA.\n", name="School"), filename_stem="school")
+    path_before = store.path_for("school")
+
+    store.rename("school", "Renamed School")
+
+    assert store.path_for("school") == path_before
+    assert path_before.exists()
+    assert list(tmp_path.glob("*.md")) == [path_before]
+
+
 def test_clear_deletes_unpreserved_results_and_keeps_preserved(tmp_path):
     store = FilesystemResultStorage(tmp_path)
     store.save(Result(content="## School\n\nA.\n", name="School"), filename_stem="school")

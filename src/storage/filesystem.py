@@ -175,6 +175,12 @@ class FilesystemResultStorage:
         path = self.path_for(filename_stem)
         frontmatter.dump(result.to_post(), str(path))
 
+    def rename(self, filename_stem: str, new_name: str) -> None:
+        result = self.load(filename_stem)
+        result.name = new_name
+        path = self.path_for(filename_stem)
+        frontmatter.dump(result.to_post(), str(path))
+
     def clear(self) -> ClearResult:
         deleted = 0
         skipped = 0

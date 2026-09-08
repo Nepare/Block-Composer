@@ -570,6 +570,27 @@ def results_unpreserve(result_id: str, key: str):
     return {"preserved": False}
 
 
+class ResultRenameRequest(BaseModel):
+    name: str
+
+
+@app.post("/results/{result_id}/rename")
+def results_rename(result_id: str, payload: ResultRenameRequest, key: str):
+    settings = load_settings()
+    if not _authorized(settings, key):
+        return PlainTextResponse("Unauthorized", status_code=401)
+
+    if not payload.name.strip():
+        return PlainTextResponse("name must not be empty.", status_code=400)
+
+    store = get_result_storage(settings)
+    try:
+        store.rename(result_id, payload.name)
+    except BlockNotFoundError as exc:
+        return PlainTextResponse(str(exc), status_code=404)
+    return {"id": result_id, "name": payload.name}
+
+
 @app.post("/results/clear")
 def results_clear(key: str):
     settings = load_settings()
