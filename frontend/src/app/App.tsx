@@ -14,9 +14,20 @@ import { TooltipProvider } from "@/shared/ui/tooltip";
 type SessionState = "checking" | "unauthenticated" | "authenticated";
 type ActiveTab = "compose" | "library";
 
+const ACTIVE_TAB_STORAGE_KEY = "cvdocs.activeTab";
+
+function readStoredActiveTab(): ActiveTab {
+  try {
+    const stored = sessionStorage.getItem(ACTIVE_TAB_STORAGE_KEY);
+    return stored === "library" ? "library" : "compose";
+  } catch {
+    return "compose";
+  }
+}
+
 function App() {
   const [sessionState, setSessionState] = useState<SessionState>("checking");
-  const [activeTab, setActiveTab] = useState<ActiveTab>("compose");
+  const [activeTab, setActiveTab] = useState<ActiveTab>(readStoredActiveTab);
   const [notice, setNotice] = useState<string | undefined>();
   const [refetchToken, setRefetchToken] = useState(0);
 
@@ -98,7 +109,15 @@ function App() {
     <TooltipProvider>
       <Tabs
         value={activeTab}
-        onValueChange={(value) => setActiveTab(value as ActiveTab)}
+        onValueChange={(value) => {
+          const tab = value as ActiveTab;
+          setActiveTab(tab);
+          try {
+            sessionStorage.setItem(ACTIVE_TAB_STORAGE_KEY, tab);
+          } catch {
+            // storage unavailable — tab selection simply won't persist
+          }
+        }}
         className="h-full gap-0"
       >
         <header className="flex h-24 shrink-0 items-end gap-4 border-b bg-background px-5 pb-3">

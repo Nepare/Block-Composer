@@ -123,7 +123,8 @@ export function BlockTile({ block, viewMode, onView, onMutate, onEdit, onToggleP
             aria-label={label}
             className={cn(
               !isList && "w-full justify-start gap-2 rounded-lg px-2 text-muted-foreground",
-              key === "delete" && "text-destructive hover:bg-destructive/10 hover:text-destructive"
+              key === "delete" && "text-destructive hover:bg-destructive/10 hover:text-destructive",
+              key === "delete" && block.preserved && "disabled:opacity-30"
             )}
           >
             <Icon />
