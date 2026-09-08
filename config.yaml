@@ -11,9 +11,9 @@ llm:
     docker_base_url: http://ollama:11434
 
   models:
-    generate: openrouter:nvidia/nemotron-3-super-120b-a12b:free
-    mutate: openrouter:nvidia/nemotron-3-super-120b-a12b:free
-    compose: openrouter:nvidia/nemotron-3-ultra-550b-a55b:free
+    generate: openrouter:openai/gpt-oss-20b
+    mutate: openrouter:openai/gpt-oss-20b
+    compose: openrouter:openai/gpt-oss-20b
     naming: ollama:qwen3:1.7b
     keywords: ollama:qwen3:1.7b
 
