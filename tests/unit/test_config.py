@@ -42,9 +42,9 @@ def test_load_settings_allows_naming_and_keywords_to_share_the_same_model(tmp_pa
 def test_defaults_when_config_file_is_missing(tmp_path):
     settings = load_settings(tmp_path / "missing.yaml")
     assert settings.path.blocks_dir == "output/blocks"
-    assert settings.llm.models.generate == "openrouter:minimax/minimax-m3:free"
-    assert settings.llm.models.naming == "openrouter:minimax/minimax-m3:free"
-    assert settings.llm.models.keywords == "openrouter:minimax/minimax-m3:free"
+    assert settings.llm.models.generate == "openrouter:nvidia/nemotron-3-super-120b-a12b:free"
+    assert settings.llm.models.naming == "openrouter:nvidia/nemotron-3-super-120b-a12b:free"
+    assert settings.llm.models.keywords == "openrouter:nvidia/nemotron-3-super-120b-a12b:free"
 
 
 def test_load_settings_reads_yaml_overrides(tmp_path):

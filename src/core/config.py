@@ -42,11 +42,11 @@ class ProviderConfig(BaseModel):
 
 class ModelsConfig(BaseModel):
     # Defaults only apply if config.yaml is missing entirely — it's the actual source of truth.
-    generate: str = "openrouter:minimax/minimax-m3:free"
-    mutate: str = "openrouter:minimax/minimax-m3:free"
-    compose: str = "openrouter:minimax/minimax-m3:free"
-    naming: str = "openrouter:minimax/minimax-m3:free"
-    keywords: str = "openrouter:minimax/minimax-m3:free"
+    generate: str = "openrouter:nvidia/nemotron-3-super-120b-a12b:free"
+    mutate: str = "openrouter:nvidia/nemotron-3-super-120b-a12b:free"
+    compose: str = "openrouter:nvidia/nemotron-3-ultra-550b-a55b:free"
+    naming: str = "openrouter:nvidia/nemotron-3-super-120b-a12b:free"
+    keywords: str = "openrouter:nvidia/nemotron-3-super-120b-a12b:free"
 
 
 class GoogleConfig(BaseModel):
