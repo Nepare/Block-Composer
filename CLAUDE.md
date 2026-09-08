@@ -102,8 +102,16 @@ stay at `tests/` root, shared across every category.
 
 ## Testing & verification
 
-- `pytest` runs fully offline (mocked LLM calls, `tmp_path`-backed storage — never the repo's
-  own `output/` directory).
+- `pytest` MUST run to green with zero network access and zero API cost — no real LLM call
+  (OpenRouter/Ollama), no real Google OAuth/Docs/Drive call, no other outbound request, ever,
+  including in CI (Constitution Principle VI, non-negotiable). Mock/patch the SDK call site
+  (`tests/fakes.py`'s `FakeLLMClient`/`FakeBlockStorage`/`FakeResultStorage`, or
+  `monkeypatch`/`unittest.mock.patch` on `OpenAI`, `urllib.request.urlopen`, `Flow.fetch_token`,
+  `Credentials.refresh`, etc.) — never hit the network to "sanity check" something, even
+  outside pytest. Filesystem-backed tests use `tmp_path`, never the repo's own `output/`
+  directory.
 - Verifying a feature against the real stack before calling it done is covered by the
-  `live-verification` skill (non-negotiable, Constitution Principle III); verifying a frontend
-  change is covered by the `frontend-verification` skill. Neither is repeated here.
+  `live-verification` skill (non-negotiable, Constitution Principle III) — this is a
+  deliberate, separate, human-in-the-loop step, never something that leaks into `pytest`
+  itself; verifying a frontend change is covered by the `frontend-verification` skill. Neither
+  is repeated here.

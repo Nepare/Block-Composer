@@ -1,13 +1,13 @@
 <!--
 Sync Impact Report
-- Version change: 2.0.0 → 2.1.0
-- Modified principles: III. Live Verification Over the Real Stack — clarified (additive,
-  non-breaking): live-verification calls should be batched into a single script/tool
-  invocation where practical rather than run one-by-one, and frontend verification should
-  lean on code/log/network-level checks rather than iterative screenshot/computer-vision
-  analysis, reserving a screenshot for a final sanity check. The core requirement (a real
-  run against the real stack before a feature is done) is unchanged.
-- Added principles: none
+- Version change: 2.1.0 → 2.2.0
+- Modified principles: none (VI renumbered to VII, unchanged in content)
+- Added principles: VI. No Real Network/API Calls in the Test Suite (NON-NEGOTIABLE) — pulls
+  the network/API-mocking rule out of "Technology & Testing Constraints" (where it only
+  covered LLM calls) and promotes it to a standalone non-negotiable principle covering LLM
+  calls, Google OAuth/Docs/Drive calls, and any other outbound network request; clarifies
+  that constructing a real SDK object in-memory is fine, only the outbound call must be
+  mocked, and that integration-style tests may not silently skip without credentials.
 - Added sections: none
 - Removed sections: none
 - Follow-up TODOs: existing CVDOCS_STORAGE_BACKEND usage (src/core/config.py's
@@ -66,7 +66,18 @@ MUST NOT become a general override mechanism for ordinary settings, deployment-e
 facts included. Any existing env-var override of this kind is a violation to be migrated to
 the runtime-detection pattern by the next feature that touches it, not left in place.
 
-### VI. Minimal, Behavior-Only Comments
+### VI. No Real Network/API Calls in the Test Suite (NON-NEGOTIABLE)
+`pytest` MUST run to green with zero network access and zero API cost, every time, including
+in CI and offline. No test may perform a real LLM call (OpenRouter, Ollama, or any future
+provider), a real Google OAuth/Docs/Drive API call, or any other outbound network request.
+Every such boundary MUST be mocked or faked. Constructing a real SDK object (e.g. 
+`Credentials(...)`) with in-memory, made-up field values is fine — it never leaves the process; 
+only the call that would leave the process must be mocked. A live run against the real stack 
+(Principle III) is a deliberate, separate, human-in-the-loop step outside `pytest` — it MUST 
+NOT leak into the automated suite as an unmocked call, a `pytest.mark` "integration" test that 
+silently skips without credentials, or a "quick sanity check" script that hits a real endpoint.
+
+### VII. Minimal, Behavior-Only Comments
 Default to no comments; well-named identifiers carry the *what*. When a comment is genuinely
 needed, it MUST be a few words to a single short line — never a multi-line block. A change
 MUST NOT be accompanied by comments narrating that a change was made, what it replaced, or
@@ -79,12 +90,11 @@ example belongs in a test, not inline in a comment.
 
 Python 3.11+, Typer + Rich for the CLI, pydantic `BaseModel`s for all configuration. Prefer
 the standard library over a new dependency (e.g. `sqlite3` over an ORM) unless the problem
-genuinely outgrows what stdlib can do proportionately. The test suite (`pytest`) MUST NOT
-make real network/API calls — every LLM call is mocked via `tests/fakes.py`'s
-`FakeLLMClient`/`FakeBlockStorage`/`FakeResultStorage`; filesystem-backed tests use
-`pytest`'s real `tmp_path`, never the project's own `output/` directories. A new pluggable
-backend MUST ship with its own test coverage before being considered done, and MUST be
-exercised by at least one live run (Principle III) prior to being reported complete.
+genuinely outgrows what stdlib can do proportionately. The test suite MUST NOT make real
+network/API calls (Principle VI); filesystem-backed tests use `pytest`'s real `tmp_path`,
+never the project's own `output/` directories. A new pluggable backend MUST ship with its own
+test coverage before being considered done, and MUST be exercised by at least one live run
+(Principle III) prior to being reported complete.
 
 ## Development Workflow
 
@@ -104,4 +114,4 @@ PR/commit description or session summary at the time it happens, not retrofitted
 Complexity (a new dependency, a new abstraction layer, a new config axis) must be justified
 against Principle II before it's added.
 
-**Version**: 2.1.0 | **Ratified**: 2026-09-01 | **Last Amended**: 2026-09-04
+**Version**: 2.2.0 | **Ratified**: 2026-09-01 | **Last Amended**: 2026-09-08
