@@ -37,7 +37,6 @@ interface ControlSpec {
   label: string;
   icon: typeof RefreshCw;
   handler?: () => void;
-  variant: "outline" | "destructive";
 }
 
 export function BlockTile({ block, viewMode, onMutate, onEdit, onTogglePreserve, onDelete }: BlockTileProps) {
@@ -46,38 +45,36 @@ export function BlockTile({ block, viewMode, onMutate, onEdit, onTogglePreserve,
   const isList = viewMode === "list";
 
   const controls: ControlSpec[] = [
-    { key: "mutate", label: "Mutate", icon: RefreshCw, handler: onMutate, variant: "outline" },
-    { key: "edit", label: "Edit", icon: Pencil, handler: onEdit, variant: "outline" },
-    {
-      key: "preserve",
-      label: block.preserved ? "Unpreserve" : "Preserve",
-      icon: Shield,
-      handler: onTogglePreserve,
-      variant: "outline",
-    },
-    { key: "delete", label: "Delete", icon: Trash2, handler: onDelete, variant: "destructive" },
+    { key: "mutate", label: "Mutate", icon: RefreshCw, handler: onMutate },
+    { key: "edit", label: "Edit", icon: Pencil, handler: onEdit },
+    { key: "preserve", label: block.preserved ? "Unpreserve" : "Preserve", icon: Shield, handler: onTogglePreserve },
+    { key: "delete", label: "Delete", icon: Trash2, handler: onDelete },
   ];
 
   return (
     <div
       data-testid="block-tile"
       className={cn(
-        "flex gap-3 rounded-lg border bg-card p-3",
-        block.preserved ? "border-2 border-primary" : "border-border",
-        isList ? "flex-row items-center" : "flex-col"
+        "flex overflow-hidden rounded-2xl border bg-card transition-shadow hover:shadow-md",
+        block.preserved ? "border-2 border-primary" : "border-border"
       )}
     >
-      <div className={cn("flex min-w-0 flex-1 gap-2", isList ? "flex-row items-center" : "flex-col")}>
+      <div
+        className={cn(
+          "flex min-w-0 flex-1 items-start gap-3 p-4",
+          isList && "flex-row items-center"
+        )}
+      >
         <OriginIcon origin={origin} />
         <div className="min-w-0 flex-1">
-          <p className="truncate font-medium">{block.name}</p>
+          <p className="truncate text-sm font-semibold text-foreground">{block.name}</p>
           {environmentText && (
             <Tooltip>
               <TooltipTrigger
                 render={
                   <p
                     tabIndex={0}
-                    className="line-clamp-2 text-xs text-muted-foreground"
+                    className="line-clamp-2 mt-1 text-xs leading-relaxed text-muted-foreground"
                     title={environmentText}
                   />
                 }
@@ -89,16 +86,25 @@ export function BlockTile({ block, viewMode, onMutate, onEdit, onTogglePreserve,
           )}
         </div>
       </div>
-      <div className={cn("flex shrink-0 gap-1", isList ? "flex-row" : "flex-col")}>
-        {controls.map(({ key, label, icon: Icon, handler, variant }) => (
+      <div
+        className={cn(
+          "flex shrink-0 gap-0.5 border-l border-border px-1.5",
+          isList ? "flex-row items-center" : "w-28 flex-col justify-center py-2"
+        )}
+      >
+        {controls.map(({ key, label, icon: Icon, handler }) => (
           <Button
             key={key}
             type="button"
-            variant={variant}
+            variant="ghost"
             size={isList ? "icon-sm" : "sm"}
             disabled={!handler || (key === "delete" && block.preserved)}
             onClick={handler}
             aria-label={label}
+            className={cn(
+              !isList && "w-full justify-start gap-2 rounded-lg px-2 text-muted-foreground",
+              key === "delete" && "text-destructive hover:bg-destructive/10 hover:text-destructive"
+            )}
           >
             <Icon />
             <span className={cn(isList && "sr-only")}>{label}</span>
@@ -130,27 +136,27 @@ export function PendingBlockTile({ job, viewMode, onDismiss }: PendingBlockTileP
     <div
       data-testid="pending-block-tile"
       className={cn(
-        "flex gap-3 rounded-lg border border-dashed bg-card p-3",
+        "flex gap-3 rounded-2xl border-2 border-dashed bg-card p-4 opacity-80",
         isError ? "border-destructive" : "border-border",
-        isList ? "flex-row items-center" : "flex-col"
+        isList ? "flex-row items-center" : "flex-col items-start"
       )}
     >
-      <div className={cn("flex min-w-0 flex-1 gap-2", isList ? "flex-row items-center" : "flex-col")}>
+      <div className={cn("flex min-w-0 flex-1 gap-3", isList ? "flex-row items-center" : "flex-col items-start")}>
         <OriginIcon origin={origin} />
         <div className="min-w-0 flex-1">
           {isError ? (
             <>
-              <p className="font-medium text-destructive">Failed</p>
-              <p className="text-xs text-muted-foreground">{job.errorMessage}</p>
+              <p className="text-sm font-semibold text-destructive">Failed</p>
+              <p className="mt-1 text-xs text-muted-foreground">{job.errorMessage}</p>
             </>
           ) : (
             <>
-              <p className="flex items-center gap-1.5 font-medium">
-                <Loader2 className="size-3.5 animate-spin" />
+              <p className="flex items-center gap-1.5 text-sm font-semibold">
+                <Loader2 className="size-3.5 animate-spin text-primary" />
                 Working...
               </p>
               {job.messages.length > 0 && (
-                <ul className="text-xs text-muted-foreground">
+                <ul className="mt-1 text-xs text-muted-foreground">
                   {job.messages.map((message, index) => (
                     <li key={index}>{message}</li>
                   ))}

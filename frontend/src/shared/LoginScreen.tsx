@@ -37,8 +37,12 @@ export function LoginScreen({ onValidated, notice }: LoginScreenProps) {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-6">
-      <form onSubmit={handleSubmit} className="w-full max-w-sm space-y-4">
+    <div className="flex min-h-screen items-center justify-center bg-muted/30 p-6">
+      <form
+        onSubmit={handleSubmit}
+        className="w-full max-w-sm space-y-4 rounded-3xl border bg-card p-8 shadow-sm"
+      >
+        <h1 className="text-base font-semibold">Sign in to cvdocs</h1>
         {notice && <p className="text-sm text-muted-foreground">{notice}</p>}
         <div className="space-y-1.5">
           <label htmlFor="secret" className="text-sm font-medium">
@@ -53,7 +57,7 @@ export function LoginScreen({ onValidated, notice }: LoginScreenProps) {
             placeholder="Paste your API secret"
           />
         </div>
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && <p className="rounded-xl bg-destructive/10 px-3.5 py-2.5 text-sm text-destructive">{error}</p>}
         <Button type="submit" disabled={submitting} className="w-full">
           {submitting ? "Checking..." : "Continue"}
         </Button>

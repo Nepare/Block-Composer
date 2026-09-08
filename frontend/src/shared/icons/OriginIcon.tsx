@@ -6,22 +6,22 @@ const ORIGIN_BADGES: Record<BlockOrigin, { emoji: string; label: string; classNa
   dissected: {
     emoji: "🌐",
     label: "Dissected",
-    className: "bg-blue-500/10 text-blue-700 dark:text-blue-300",
+    className: "bg-blue-500/15 text-blue-700 dark:text-blue-300",
   },
   mutated: {
     emoji: "♻️",
     label: "Mutated",
-    className: "bg-amber-500/10 text-amber-700 dark:text-amber-300",
+    className: "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300",
   },
   generated: {
     emoji: "🌱",
     label: "Generated",
-    className: "bg-green-500/10 text-green-700 dark:text-green-300",
+    className: "bg-green-500/15 text-green-700 dark:text-green-300",
   },
   manual: {
     emoji: "✏️",
     label: "Manual",
-    className: "bg-slate-500/10 text-slate-700 dark:text-slate-300",
+    className: "bg-slate-500/15 text-slate-700 dark:text-slate-300",
   },
 }
 
@@ -38,7 +38,7 @@ function OriginIcon({ origin, className }: OriginIconProps) {
       aria-label={badge.label}
       title={badge.label}
       className={cn(
-        "inline-flex size-6 items-center justify-center rounded-full text-sm",
+        "inline-flex size-8 shrink-0 items-center justify-center rounded-xl text-base select-none",
         badge.className,
         className
       )}

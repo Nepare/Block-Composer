@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Search } from "lucide-react";
+import { FileText, Plus, Search } from "lucide-react";
 import { toast } from "sonner";
 import {
   clearBlocks,
@@ -219,23 +219,28 @@ export function BlockGrid({
   return (
     <div className="flex flex-col gap-4 p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="relative w-full max-w-sm">
-          <Search className="pointer-events-none absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Search blocks"
-            aria-label="Search blocks"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            className="pl-7"
-          />
-        </div>
+        <h2 className="text-sm font-semibold">Library</h2>
         <div className="flex items-center gap-3">
-          <div className="flex gap-1" role="group" aria-label="View mode">
+          <div className="relative w-full max-w-xs">
+            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search blocks"
+              aria-label="Search blocks"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              className="pl-8"
+            />
+          </div>
+          <div
+            className="flex items-center gap-0.5 rounded-2xl border bg-card p-1"
+            role="group"
+            aria-label="View mode"
+          >
             {VIEW_MODES.map(({ value, label }) => (
               <Button
                 key={value}
                 type="button"
-                variant={viewMode === value ? "default" : "outline"}
+                variant={viewMode === value ? "secondary" : "ghost"}
                 size="sm"
                 aria-pressed={viewMode === value}
                 onClick={() => selectViewMode(value)}
@@ -244,13 +249,21 @@ export function BlockGrid({
               </Button>
             ))}
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={() => setDissectOpen(true)}>
-            Populate the library from Google Docs
-          </Button>
-          <Button type="button" variant="outline" size="sm" onClick={() => setClearOpen(true)}>
-            Clear library
-          </Button>
         </div>
+      </div>
+      <div className="flex items-center gap-3">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setDissectOpen(true)}
+          className="flex-1 justify-center gap-2.5 border-dashed py-5 text-muted-foreground hover:border-primary/40 hover:text-primary"
+        >
+          <FileText className="size-4 text-primary" />
+          Populate the library from Google Docs
+        </Button>
+        <Button type="button" variant="ghost" size="sm" onClick={() => setClearOpen(true)}>
+          Clear library
+        </Button>
       </div>
       {loading ? (
         <p className="text-muted-foreground">Loading library...</p>
@@ -262,11 +275,11 @@ export function BlockGrid({
               onClick={() => setGenerateOpen(true)}
               aria-label="Generate a new block"
               className={cn(
-                "flex items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-transparent p-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
-                viewMode === "list" ? "flex-row py-2" : "flex-col py-6"
+                "flex items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-primary/30 bg-transparent p-3 text-sm font-semibold text-primary transition-colors hover:border-primary/60 hover:bg-primary/5",
+                viewMode === "list" ? "flex-row py-3" : "flex-col py-8"
               )}
             >
-              <Plus className="size-5" />
+              <Plus className={viewMode === "list" ? "size-5" : "size-6"} />
               Generate
             </button>
             {pendingJobs.filter((job) => job.kind !== "dissect").map((job) => (

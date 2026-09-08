@@ -103,15 +103,19 @@ export function GenerateMutateDialog(props: GenerateMutateDialogProps) {
     >
       <form onSubmit={handleSubmit} className="flex flex-col gap-3">
         {props.mode === "mutate" && (
-          <div className="flex flex-col gap-1">
-            <span className="text-sm font-medium">Source block</span>
-            <p className="text-sm">{props.sourceBlock.name}</p>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+              Source block
+            </span>
+            <div className="rounded-xl border bg-muted/50 px-3.5 py-2.5">
+              <p className="text-sm font-semibold">{props.sourceBlock.name}</p>
+            </div>
             <textarea
               readOnly
               disabled
               value={sourceDetail?.body ?? ""}
               aria-label="Source block content"
-              className="min-h-24 w-full rounded-lg border border-input bg-muted px-2.5 py-1.5 text-sm text-muted-foreground"
+              className="min-h-24 w-full rounded-xl border border-input bg-muted px-3 py-2 text-sm text-muted-foreground"
             />
           </div>
         )}
@@ -124,7 +128,7 @@ export function GenerateMutateDialog(props: GenerateMutateDialogProps) {
             required
             value={criteria}
             onChange={(event) => setCriteria(event.target.value)}
-            className="min-h-20 w-full rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
+            className="min-h-20 w-full rounded-xl border border-input bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
             placeholder="What should this block describe?"
           />
         </div>
@@ -134,17 +138,17 @@ export function GenerateMutateDialog(props: GenerateMutateDialogProps) {
           </label>
           <Input id="generate-name" value={name} onChange={(event) => setName(event.target.value)} />
         </div>
-        <label className="flex items-center gap-2 text-sm">
+        <label className="flex items-center gap-2 text-sm text-muted-foreground">
           <input
             type="checkbox"
             checked={preserve}
             onChange={(event) => setPreserve(event.target.checked)}
-            className="size-4 rounded border-input"
+            className="size-4 rounded border-input accent-primary"
           />
           Preserve immediately
         </label>
-        {error && <p className="text-sm text-destructive">{error}</p>}
-        <Button type="submit" disabled={!criteria.trim() || submitting}>
+        {error && <p className="rounded-xl bg-destructive/10 px-3.5 py-2.5 text-sm text-destructive">{error}</p>}
+        <Button type="submit" disabled={!criteria.trim() || submitting} className="w-full">
           {mode === "mutate" ? "Mutate" : "Generate"}
         </Button>
       </form>

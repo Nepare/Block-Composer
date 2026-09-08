@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { FileText } from "lucide-react";
 import { startDissect } from "@/features/library/api";
 import { useGoogleAuthStatus } from "@/features/library/useGoogleAuthStatus";
 import * as session from "@/shared/session";
@@ -73,15 +74,22 @@ export function DissectDialog({ open, onOpenChange, onJobStarted }: DissectDialo
         if (!next) reset();
         onOpenChange(next);
       }}
-      title="Populate from Google Docs"
+      title={
+        <span className="flex items-center gap-2">
+          <FileText className="size-4 text-primary" />
+          Populate from Google Docs
+        </span>
+      }
       description="Import blocks from a Google Doc. Closing this dialog does not stop the import."
     >
       <div className="flex flex-col gap-4">
         {connected ? (
-          <p className="text-sm font-medium">Connected</p>
+          <div className="rounded-xl border bg-muted/50 px-3.5 py-2.5">
+            <p className="text-sm font-semibold">Connected</p>
+          </div>
         ) : (
           !checking && (
-            <Button type="button" variant="outline" onClick={handleConnect}>
+            <Button type="button" variant="outline" onClick={handleConnect} className="justify-center">
               Connect Google Account
             </Button>
           )
@@ -98,17 +106,19 @@ export function DissectDialog({ open, onOpenChange, onJobStarted }: DissectDialo
               placeholder="https://docs.google.com/document/d/..."
             />
           </div>
-          <label className="flex items-center gap-2 text-sm">
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
             <input
               type="checkbox"
               checked={preserve}
               onChange={(event) => setPreserve(event.target.checked)}
-              className="size-4 rounded border-input"
+              className="size-4 rounded border-input accent-primary"
             />
             Add as preserved
           </label>
-          {error && <p className="text-sm text-destructive">{error}</p>}
-          <Button type="submit" disabled={!valid || submitting}>
+          {error && (
+            <p className="rounded-xl bg-destructive/10 px-3.5 py-2.5 text-sm text-destructive">{error}</p>
+          )}
+          <Button type="submit" disabled={!valid || submitting} className="w-full">
             Populate
           </Button>
         </form>

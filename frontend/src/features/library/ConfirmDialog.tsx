@@ -37,18 +37,18 @@ export function ConfirmDialog({ open, onOpenChange, title, description, onConfir
     <Modal open={open} onOpenChange={handleOpenChange} title={title} description={description}>
       <div className="flex flex-col gap-4">
         {suppressionKey && (
-          <label className="flex items-center gap-2 text-sm">
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
             <input
               type="checkbox"
               checked={dontShowAgain}
               onChange={(event) => setDontShowAgain(event.target.checked)}
-              className="size-4 rounded border-input"
+              className="size-4 rounded border-input accent-primary"
             />
             Don't show this again
           </label>
         )}
         <div className="flex justify-end gap-2">
-          <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
+          <Button type="button" variant="ghost" onClick={() => handleOpenChange(false)}>
             Cancel
           </Button>
           <Button type="button" variant="destructive" onClick={handleConfirm}>

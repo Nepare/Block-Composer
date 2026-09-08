@@ -67,7 +67,7 @@ function otherFieldToText(value: string[] | string): string {
 }
 
 const textareaClassName =
-  "min-h-16 w-full rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30";
+  "min-h-16 w-full rounded-xl border border-input bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30";
 
 export function EditBlockDialog({ blockId, open, onOpenChange, onSaved }: EditBlockDialogProps) {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -228,9 +228,9 @@ export function EditBlockDialog({ blockId, open, onOpenChange, onSaved }: EditBl
               />
             </div>
           ))}
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p className="rounded-xl bg-destructive/10 px-3.5 py-2.5 text-sm text-destructive">{error}</p>}
           <div className="flex items-center justify-between gap-2">
-            <Button type="button" variant="outline" onClick={handleCopyFullBlock}>
+            <Button type="button" variant="ghost" onClick={handleCopyFullBlock}>
               Copy full block
             </Button>
             <Button type="submit" disabled={saving}>
