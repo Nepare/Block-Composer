@@ -38,6 +38,32 @@ def test_openrouter_chat_returns_content_and_passes_model_through(mock_openai_cl
 
 
 @patch("llm.providers.openrouter.OpenAI")
+def test_openrouter_omits_reasoning_effort_by_default(mock_openai_cls):
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = _fake_openai_response("hello")
+    mock_openai_cls.return_value = mock_client
+
+    client = OpenRouterClient(api_key="sk-test")
+    client.chat([{"role": "user", "content": "hi"}], "openrouter/free")
+
+    _, kwargs = mock_client.chat.completions.create.call_args
+    assert kwargs["extra_body"] == {"reasoning": {"exclude": True}}
+
+
+@patch("llm.providers.openrouter.OpenAI")
+def test_openrouter_sends_reasoning_effort_when_given(mock_openai_cls):
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = _fake_openai_response("hello")
+    mock_openai_cls.return_value = mock_client
+
+    client = OpenRouterClient(api_key="sk-test")
+    client.chat([{"role": "user", "content": "hi"}], "openrouter/free", reasoning_effort="medium")
+
+    _, kwargs = mock_client.chat.completions.create.call_args
+    assert kwargs["extra_body"] == {"reasoning": {"exclude": True, "effort": "medium"}}
+
+
+@patch("llm.providers.openrouter.OpenAI")
 def test_openrouter_raises_without_api_key_before_calling_the_sdk(mock_openai_cls):
     mock_client = MagicMock()
     mock_openai_cls.return_value = mock_client
@@ -84,6 +110,22 @@ def test_ollama_disables_thinking_and_passes_options_through(mock_urlopen):
     assert body["think"] is False
     assert body["options"]["temperature"] == 0.2
     assert body["options"]["num_predict"] == 40
+
+
+@patch("llm.providers.ollama.urllib.request.urlopen")
+def test_ollama_accepts_and_ignores_reasoning_effort(mock_urlopen):
+    """Ollama has no graduated effort scale -- the param must be accepted (Protocol
+    conformance) but not change the request payload at all."""
+    mock_urlopen.return_value = _fake_urlopen_cm({"message": {"content": "ok"}})
+
+    client = OllamaClient()
+    client.chat([{"role": "user", "content": "hi"}], "qwen3:1.7b", reasoning_effort="medium")
+
+    request = mock_urlopen.call_args[0][0]
+    body = json.loads(request.data)
+    assert body["think"] is False
+    assert "reasoning" not in body
+    assert "reasoning_effort" not in body
 
 
 @patch("llm.providers.ollama.urllib.request.urlopen")

@@ -228,6 +228,22 @@ def test_planning_call_includes_constraints_file_in_the_system_prompt(settings, 
     assert "Prefer mutate over generate." in naming_system_message
 
 
+def test_reasoning_effort_is_medium_for_planning_and_unset_for_naming_and_keywords(settings, fake_router):
+    _seed_library(settings)
+    settings.behavior.compose.keyword_search_top_n = 1  # force narrowing to run, not skip
+    plan = json.dumps({"steps": [{"order": 1, "action": "use", "block_id": "school", "criteria": None}]})
+    unparseable_keywords_reply = "I cannot help with that."
+    client = FakeLLMClient(replies=["NONE", unparseable_keywords_reply, plan, "school_result"])
+    fake_router(compose_module, client)
+
+    compose_module.run_compose("need a school", settings=settings)
+
+    assert client.calls[0]["reasoning_effort"] is None  # target-count detection (naming tier)
+    assert client.calls[1]["reasoning_effort"] is None  # keyword extraction (keywords tier)
+    assert client.calls[2]["reasoning_effort"] == "medium"  # the planning decision itself
+    assert client.calls[3]["reasoning_effort"] == "low"  # result naming (compose tier, but a pick, not a plan)
+
+
 def test_target_count_detection_call_never_receives_compose_constraints(settings, fake_router, tmp_path):
     _seed_library(settings)
     constraints_file = tmp_path / "COMPOSE_CONSTRAINTS.md"

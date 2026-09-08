@@ -29,6 +29,7 @@ def test_run_mutate_single_call_produces_body_and_bracket_label(settings, fake_r
     assert block.mutated_from == "police_station"
     assert block.created_by == "mutated"
     assert client.call_count == 1
+    assert client.calls[0]["reasoning_effort"] == "low"
 
 
 def test_run_mutate_inherits_tags_from_the_original(settings, fake_router):

@@ -188,9 +188,16 @@ class FakeLLMClient:
         *,
         temperature: float = 0.3,
         max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
     ) -> str:
         self.calls.append(
-            {"messages": messages, "model": model, "temperature": temperature, "max_tokens": max_tokens}
+            {
+                "messages": messages,
+                "model": model,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "reasoning_effort": reasoning_effort,
+            }
         )
         if not self.replies:
             raise AssertionError("FakeLLMClient ran out of scripted replies")

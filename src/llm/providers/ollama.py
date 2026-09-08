@@ -21,7 +21,9 @@ class OllamaClient:
         *,
         temperature: float = 0.3,
         max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
     ) -> str:
+        # Ollama has no graduated effort scale — only the "think" toggle already sent below.
         options = {"temperature": temperature}
         if max_tokens is not None:
             options["num_predict"] = max_tokens

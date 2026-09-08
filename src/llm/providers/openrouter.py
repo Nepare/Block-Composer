@@ -22,12 +22,17 @@ class OpenRouterClient:
         *,
         temperature: float = 0.3,
         max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
     ) -> str:
         if not self._api_key:
             raise LLMError(
                 "OPENROUTER_API_KEY is not set — add it to .env. The free tier costs $0 "
                 "but still needs a key from https://openrouter.ai/keys."
             )
+
+        reasoning: dict = {"exclude": True}
+        if reasoning_effort is not None:
+            reasoning["effort"] = reasoning_effort
 
         # One retry: a free/auto-routed model can land on a different provider each call,
         # and OpenRouter sometimes returns choices: null with HTTP 200 instead of raising.
@@ -39,7 +44,7 @@ class OpenRouterClient:
                     messages=messages,
                     temperature=temperature,
                     max_tokens=max_tokens,
-                    extra_body={"reasoning": {"exclude": True}},
+                    extra_body={"reasoning": reasoning},
                 )
             except Exception as exc:
                 raise LLMError(f"OpenRouter request failed ({model}): {exc}") from exc

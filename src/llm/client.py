@@ -9,4 +9,5 @@ class LLMClient(Protocol):
         *,
         temperature: float = 0.3,
         max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
     ) -> str: ...

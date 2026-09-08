@@ -21,6 +21,15 @@ def test_run_generate_saves_valid_reply(settings, fake_router):
     assert client.call_count == 1
 
 
+def test_run_generate_uses_low_reasoning_effort(settings, fake_router):
+    client = FakeLLMClient(replies=["## Sheriff Outpost\n\nA frontier outpost.\n\n**Role:** nobody\n"])
+    fake_router(generate_module, client)
+
+    generate_module.run_generate("a sheriff outpost", settings=settings)
+
+    assert client.calls[0]["reasoning_effort"] == "low"
+
+
 def test_run_generate_retries_once_on_invalid_reply(settings, fake_router):
     client = FakeLLMClient(
         replies=[
@@ -34,6 +43,7 @@ def test_run_generate_retries_once_on_invalid_reply(settings, fake_router):
 
     assert decision.action == "save_plain"
     assert client.call_count == 2
+    assert client.calls[1]["reasoning_effort"] == "low"
 
 
 def test_run_generate_raises_after_second_invalid_reply(settings, fake_router):

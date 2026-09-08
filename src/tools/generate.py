@@ -65,7 +65,7 @@ def run_generate(
     messages = generate_prompt(criteria, examples, generate_constraints)
 
     progress(ProgressEvent(kind="generate_start", message=f"Generating a {schema} block…"))
-    body = client.chat(messages, model, temperature=0.5, max_tokens=900)
+    body = client.chat(messages, model, temperature=0.5, max_tokens=900, reasoning_effort="low")
     try:
         validate_block_shape(body)
     except BlockValidationError:
@@ -83,7 +83,7 @@ def run_generate(
                 "ONLY a correctly-shaped entry.",
             },
         ]
-        body = client.chat(retry_messages, model, temperature=0.5, max_tokens=900)
+        body = client.chat(retry_messages, model, temperature=0.5, max_tokens=900, reasoning_effort="low")
         validate_block_shape(body)
 
     block = Block(

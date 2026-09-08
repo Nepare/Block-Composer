@@ -52,7 +52,7 @@ def run_mutate(
     mutate_constraints = constraints_module.load(settings, "mutate")
     messages = mutate_prompt(original.body, criteria, mutate_constraints)
     progress(ProgressEvent(kind="mutate_start", message=f"Mutating {block_id}…", block_id=block_id))
-    reply = client.chat(messages, model, temperature=0.2, max_tokens=900)
+    reply = client.chat(messages, model, temperature=0.2, max_tokens=900, reasoning_effort="low")
     try:
         body, label = _parse_mutation_reply(reply)
     except BlockValidationError:
@@ -73,7 +73,7 @@ def run_mutate(
                 "format. Reply again in exactly that format.",
             },
         ]
-        reply = client.chat(retry_messages, model, temperature=0.2, max_tokens=900)
+        reply = client.chat(retry_messages, model, temperature=0.2, max_tokens=900, reasoning_effort="low")
         body, label = _parse_mutation_reply(reply)
 
     mutated = Block(

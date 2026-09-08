@@ -168,7 +168,7 @@ def _plan_with_llm(
         allow_generate=not restrict_generate,
     )
     progress(ProgressEvent(kind="plan_start", message=f"Planning against {len(catalog)} block(s) in the library…"))
-    reply = client.chat(messages, model, temperature=0.3, max_tokens=1200)
+    reply = client.chat(messages, model, temperature=0.3, max_tokens=1200, reasoning_effort="medium")
     try:
         steps = _parse_plan_reply(reply)
     except LLMError:
@@ -182,7 +182,7 @@ def _plan_with_llm(
                 "again with ONLY the JSON object, no commentary, no code fences.",
             },
         ]
-        reply = client.chat(retry_messages, model, temperature=0.3, max_tokens=1200)
+        reply = client.chat(retry_messages, model, temperature=0.3, max_tokens=1200, reasoning_effort="medium")
         steps = _parse_plan_reply(reply)
 
     slots = []
@@ -224,7 +224,7 @@ def _plan_with_llm(
                 "JSON object only, no commentary.",
             },
         ]
-        retry_reply = client.chat(retry_messages, model, temperature=0.3, max_tokens=1200)
+        retry_reply = client.chat(retry_messages, model, temperature=0.3, max_tokens=1200, reasoning_effort="medium")
         try:
             retry_steps = _parse_plan_reply(retry_reply)
             slots = [
@@ -535,7 +535,9 @@ def _generate_result_name(content: str, settings: Settings, progress: ProgressSi
     naming model's usual short two-block comparison."""
     client, model = get_client_and_model(settings.llm.models.compose, settings, on_progress=progress)
     compose_constraints = constraints_module.load(settings, "compose")
-    reply = client.chat(result_name_prompt(content, compose_constraints), model, temperature=0.2, max_tokens=20)
+    reply = client.chat(
+        result_name_prompt(content, compose_constraints), model, temperature=0.2, max_tokens=20, reasoning_effort="low"
+    )
     lines = [line.strip() for line in reply.strip().splitlines() if line.strip()]
     name = lines[0].strip("[]").strip() if lines else ""
     if not name or len(name.split()) > 6:

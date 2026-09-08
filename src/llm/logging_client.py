@@ -18,11 +18,14 @@ class LoggingLLMClient:
         *,
         temperature: float = 0.3,
         max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
     ) -> str:
         self._on_progress(ProgressEvent(kind="llm_call_start", message=f"Calling {model}…", model=model))
         start = time.monotonic()
         try:
-            reply = self._inner.chat(messages, model, temperature=temperature, max_tokens=max_tokens)
+            reply = self._inner.chat(
+                messages, model, temperature=temperature, max_tokens=max_tokens, reasoning_effort=reasoning_effort
+            )
         except Exception as exc:
             latency_ms = (time.monotonic() - start) * 1000
             self._on_progress(
