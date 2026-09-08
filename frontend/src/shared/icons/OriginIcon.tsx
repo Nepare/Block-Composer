@@ -1,6 +1,6 @@
 import { cn } from "cn"
 
-export type BlockOrigin = "dissected" | "mutated" | "generated"
+export type BlockOrigin = "dissected" | "mutated" | "generated" | "manual"
 
 const ORIGIN_BADGES: Record<BlockOrigin, { emoji: string; label: string; className: string }> = {
   dissected: {
@@ -17,6 +17,11 @@ const ORIGIN_BADGES: Record<BlockOrigin, { emoji: string; label: string; classNa
     emoji: "🌱",
     label: "Generated",
     className: "bg-green-500/10 text-green-700 dark:text-green-300",
+  },
+  manual: {
+    emoji: "✏️",
+    label: "Manual",
+    className: "bg-slate-500/10 text-slate-700 dark:text-slate-300",
   },
 }
 

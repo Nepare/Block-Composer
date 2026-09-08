@@ -40,9 +40,14 @@ test("a stored key the backend rejects returns to the login screen with an expla
   expect(session.get()).toBeNull();
 });
 
-test("once authenticated, the user can switch between Compose and Library tabs and see each one's placeholder content", async () => {
+test("once authenticated, the user can switch between Compose and Library tabs and see each one's content", async () => {
   session.set("valid-key");
-  const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 } as Response);
+  const fetchMock = vi.fn((url: string) => {
+    if (url.includes("/blocks")) {
+      return Promise.resolve({ ok: true, status: 200, json: async () => [] } as Response);
+    }
+    return Promise.resolve({ ok: true, status: 200 } as Response);
+  });
   vi.stubGlobal("fetch", fetchMock);
   const user = userEvent.setup();
 
@@ -53,7 +58,7 @@ test("once authenticated, the user can switch between Compose and Library tabs a
   expect(screen.getByText(/compose tab content is coming/i)).toBeInTheDocument();
 
   await user.click(screen.getByRole("tab", { name: /library/i }));
-  expect(await screen.findByText(/library tab content is coming/i)).toBeInTheDocument();
+  expect(await screen.findByPlaceholderText(/search blocks/i)).toBeInTheDocument();
 
   await user.click(screen.getByRole("tab", { name: /compose/i }));
   expect(await screen.findByText(/compose tab content is coming/i)).toBeInTheDocument();

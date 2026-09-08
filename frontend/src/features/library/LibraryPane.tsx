@@ -1,7 +1,19 @@
-export function LibraryPane() {
+import { BlockGrid } from "@/features/library/BlockGrid";
+import type { UseLibraryJobsResult } from "@/features/library/useLibraryJobs";
+
+interface LibraryPaneProps {
+  libraryJobs: UseLibraryJobsResult;
+  refetchToken: number;
+}
+
+export function LibraryPane({ libraryJobs, refetchToken }: LibraryPaneProps) {
   return (
-    <div className="p-6 text-muted-foreground">
-      Library tab content is coming in a future feature.
-    </div>
+    <BlockGrid
+      pendingJobs={libraryJobs.jobs}
+      onDismissJob={libraryJobs.dismiss}
+      onJobStarted={libraryJobs.start}
+      onJobResolved={libraryJobs.confirmResolved}
+      refetchToken={refetchToken}
+    />
   );
 }

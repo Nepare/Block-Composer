@@ -40,9 +40,13 @@ their own, independent Google OAuth client — set up whichever one applies to y
    OPENROUTER_API_KEY=sk-or-v1-...
    ```
 
-That's it — the model this project defaults to (`minimax/minimax-m3:free`) costs $0 to
-call; the key just identifies you for OpenRouter's free-tier rate limits (20 requests/min,
-50/day until you've ever spent $10 on the platform, then 1000/day).
+That's it — the models this project defaults to the configured model, which by default cost $0 
+to call; the key just identifies you for OpenRouter's free-tier rate limits (20 requests/min, 
+50/day until you've ever spent $10 on the platform, then 1000/day). Free-tier `:free` models sit 
+behind a shared upstream pool and can occasionally return a transient 429 (rate-limited) or, less 
+often, get deprecated outright — if `config.yaml`'s configured model ever fails outright, check
+[openrouter.ai/models](https://openrouter.ai/models) (filter by price) for a current `:free`
+slug to swap in.
 
 ### 2. Ollama (optional, for the cheaper local tasks)
 
@@ -52,7 +56,7 @@ you don't want to install Ollama, just point it back at OpenRouter instead:
 ```yaml
 llm:
   models:
-    naming: openrouter:minimax/minimax-m3:free
+    naming: openrouter:nvidia/nemotron-3-super-120b-a12b:free
 ```
 
 Setting up local models depends on how you use the app. 
@@ -159,8 +163,7 @@ doesn't connect the other.
 A React + TypeScript SPA lives in `frontend/` (Vite, Tailwind CSS v4, shadcn/ui, bun-managed).
 It's served same-origin by the FastAPI app — no separate frontend host, no CORS config. On first
 visit, paste the shared `CVDOCS_API_KEY` secret into the login screen; it's validated against
-`GET /auth/check` and persisted in the browser so subsequent visits skip the prompt. Past login,
-a Compose/Library tab shell is in place (tab content itself ships in later features).
+`GET /auth/check` and persisted in the browser so subsequent visits skip the prompt. 
 
 Local frontend development: `cd frontend && bun install && bun dev` (proxies to a separately
 running backend). Building it manually: `bun run build` (produces `frontend/dist`, served by the
