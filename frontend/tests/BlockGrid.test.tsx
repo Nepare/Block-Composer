@@ -254,6 +254,7 @@ test("BlockTile clamps a long environment list to two lines and exposes the full
   const fullText = longEnvironment.join(", ");
   const environmentEl = screen.getByTitle(fullText);
   expect(environmentEl).toHaveClass("line-clamp-2");
+  expect(environmentEl).toHaveClass("w-fit");
   expect(environmentEl).toHaveTextContent(fullText);
 });
 

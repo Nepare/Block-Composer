@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Boxes } from "lucide-react";
 import { ComposePane } from "@/features/compose/ComposePane";
 import { preserveBlock } from "@/features/library/api";
 import { LibraryPane } from "@/features/library/LibraryPane";
@@ -102,18 +101,12 @@ function App() {
         onValueChange={(value) => setActiveTab(value as ActiveTab)}
         className="h-full gap-0"
       >
-        <header className="flex h-14 shrink-0 items-center gap-4 border-b bg-background px-5">
-          <div className="flex items-center gap-2">
-            <div className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <Boxes className="size-4" />
-            </div>
-            <span className="text-[15px] font-medium">cvdocs</span>
-          </div>
-          <TabsList variant="line" className="h-full gap-1 self-stretch">
-            <TabsTrigger value="compose" className="text-sm">
+        <header className="flex h-24 shrink-0 items-end gap-4 border-b bg-background px-5 pb-3">
+          <TabsList variant="line" className="h-14 gap-4">
+            <TabsTrigger value="compose" className="px-3 py-2 text-lg font-semibold after:h-1.5">
               Compose
             </TabsTrigger>
-            <TabsTrigger value="library" className="text-sm">
+            <TabsTrigger value="library" className="px-3 py-2 text-lg font-semibold after:h-1.5">
               Library
             </TabsTrigger>
           </TabsList>
@@ -121,7 +114,7 @@ function App() {
         <TabsContent value="compose" className="min-h-0 flex-1 overflow-y-auto">
           <ComposePane />
         </TabsContent>
-        <TabsContent value="library" className="min-h-0 flex-1 overflow-y-auto">
+        <TabsContent value="library" className="min-h-0 flex-1 overflow-y-auto bg-muted">
           <LibraryPane libraryJobs={libraryJobs} refetchToken={refetchToken} />
         </TabsContent>
       </Tabs>

@@ -35,18 +35,17 @@ function slugify(text: string): string {
   return raw || "item";
 }
 
-export function parseBlockBody(body: string): EditFormFields {
-  const lines = body.split(/\r?\n/);
+// Reads the heading (if the first non-blank line is one) and the description paragraph that
+// follows it, stopping at the first field line. Shared by parseBlockBody (structured parse) and
+// splitBlockBody (raw-text split for the edit UI) so both agree on where metadata starts.
+function extractHeadingAndDescription(lines: string[]): { name: string; description: string; nextIndex: number } {
   let i = 0;
+  while (i < lines.length && !lines[i].trim()) i += 1;
 
   let name = "";
-  while (i < lines.length) {
-    const stripped = lines[i].trim();
+  if (i < lines.length && lines[i].trim().startsWith("#")) {
+    name = lines[i].trim().replace(/^#+/, "").trim();
     i += 1;
-    if (stripped.startsWith("#")) {
-      name = stripped.replace(/^#+/, "").trim();
-      break;
-    }
   }
 
   const descriptionLines: string[] = [];
@@ -60,7 +59,20 @@ export function parseBlockBody(body: string): EditFormFields {
     descriptionLines.push(stripped);
     i += 1;
   }
-  const description = descriptionLines.join(" ");
+
+  return { name, description: descriptionLines.join(" "), nextIndex: i };
+}
+
+export function splitBlockBody(body: string): { name: string; description: string; metadata: string } {
+  const lines = body.split(/\r?\n/);
+  const { name, description, nextIndex } = extractHeadingAndDescription(lines);
+  return { name, description, metadata: lines.slice(nextIndex).join("\n").trim() };
+}
+
+export function parseBlockBody(body: string): EditFormFields {
+  const lines = body.split(/\r?\n/);
+  const { name, description, nextIndex } = extractHeadingAndDescription(lines);
+  let i = nextIndex;
 
   let role: string | null = null;
   let timePeriod: string | null = null;

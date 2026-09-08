@@ -1,16 +1,11 @@
 import { useEffect, useState, type ClipboardEvent, type FormEvent } from "react";
 import { toast } from "sonner";
 import { getBlock, updateBlock, type BlockDetail } from "@/features/library/api";
-import {
-  looksLikeWholeBlock,
-  parseBlockBody,
-  reassembleBlockBody,
-  titleCaseLabel,
-  type EditFormFields,
-} from "@/features/library/blockFields";
+import { looksLikeWholeBlock, splitBlockBody } from "@/features/library/blockFields";
 import { Modal } from "@/shared/ui/Modal";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
+import { Spinner } from "@/shared/ui/Spinner";
 
 interface EditBlockDialogProps {
   blockId: string;
@@ -22,52 +17,17 @@ interface EditBlockDialogProps {
 interface FormState {
   name: string;
   description: string;
-  role: string;
-  timePeriod: string;
-  environment: string;
-  otherFields: Record<string, string[] | string>;
+  metadata: string;
 }
 
-const EMPTY_FORM: FormState = {
-  name: "",
-  description: "",
-  role: "",
-  timePeriod: "",
-  environment: "",
-  otherFields: {},
-};
+const EMPTY_FORM: FormState = { name: "", description: "", metadata: "" };
 
-function toFormState(fields: EditFormFields): FormState {
-  return {
-    name: fields.name,
-    description: fields.description,
-    role: fields.role ?? "",
-    timePeriod: fields.timePeriod ?? "",
-    environment: fields.environment.join(", "),
-    otherFields: fields.otherFields,
-  };
-}
-
-function toEditFields(form: FormState): EditFormFields {
-  return {
-    name: form.name,
-    description: form.description,
-    role: form.role.trim() || null,
-    timePeriod: form.timePeriod.trim() || null,
-    environment: form.environment
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean),
-    otherFields: form.otherFields,
-  };
-}
-
-function otherFieldToText(value: string[] | string): string {
-  return Array.isArray(value) ? value.join("\n") : value;
+function buildBody(form: FormState): string {
+  return [`# ${form.name}`, form.description, form.metadata].filter(Boolean).join("\n\n");
 }
 
 const textareaClassName =
-  "min-h-16 w-full rounded-xl border border-input bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30";
+  "min-h-64 w-full flex-1 resize-y rounded-xl border border-input bg-transparent px-3 py-2 font-mono text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30";
 
 export function EditBlockDialog({ blockId, open, onOpenChange, onSaved }: EditBlockDialogProps) {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -82,7 +42,7 @@ export function EditBlockDialog({ blockId, open, onOpenChange, onSaved }: EditBl
       setLoading(true);
       const detail = await getBlock(blockId);
       if (cancelled) return;
-      setForm(toFormState(parseBlockBody(detail.body)));
+      setForm(splitBlockBody(detail.body));
       setLoading(false);
     }
     load();
@@ -96,21 +56,16 @@ export function EditBlockDialog({ blockId, open, onOpenChange, onSaved }: EditBl
     setError(null);
   }
 
-  function distribute(text: string) {
-    setForm(toFormState(parseBlockBody(text)));
-    toast.info("Detected a whole block — distributed its content across every field.");
-  }
-
-  function handlePaste(event: ClipboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
+  function handleNamePaste(event: ClipboardEvent<HTMLInputElement>) {
     const text = event.clipboardData.getData("text");
     if (!looksLikeWholeBlock(text)) return;
     event.preventDefault();
-    distribute(text);
+    setForm(splitBlockBody(text));
+    toast.info("Detected a whole block — distributed its content across Name, Description, and Details.");
   }
 
   async function handleCopyFullBlock() {
-    const body = reassembleBlockBody(toEditFields(form));
-    await navigator.clipboard.writeText(body);
+    await navigator.clipboard.writeText(buildBody(form));
     toast.success("Copied the full block to the clipboard.");
   }
 
@@ -119,8 +74,7 @@ export function EditBlockDialog({ blockId, open, onOpenChange, onSaved }: EditBl
     setSaving(true);
     setError(null);
     try {
-      const body = reassembleBlockBody(toEditFields(form));
-      const response = await updateBlock(blockId, { body });
+      const response = await updateBlock(blockId, { body: buildBody(form) });
       if (!response.ok) {
         setError("Could not save changes. Please try again.");
         return;
@@ -133,8 +87,6 @@ export function EditBlockDialog({ blockId, open, onOpenChange, onSaved }: EditBl
     }
   }
 
-  const otherFieldEntries = Object.entries(form.otherFields);
-
   return (
     <Modal
       open={open}
@@ -143,91 +95,52 @@ export function EditBlockDialog({ blockId, open, onOpenChange, onSaved }: EditBl
         onOpenChange(next);
       }}
       title="Edit block"
-      description="Each piece of content has its own field. Copy or paste the whole block at once from any field."
+      description="Description and Details are raw markdown — edit them directly. Paste a whole block into Name to redistribute it."
+      contentClassName="sm:max-w-4xl"
     >
       {loading ? (
-        <p className="text-muted-foreground">Loading...</p>
+        <p className="flex items-center gap-2 text-muted-foreground">
+          <Spinner /> Loading...
+        </p>
       ) : (
-        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1">
-            <label htmlFor="edit-block-name" className="text-sm font-medium">
-              Name
-            </label>
-            <Input
-              id="edit-block-name"
-              value={form.name}
-              onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
-              onPaste={handlePaste}
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label htmlFor="edit-block-description" className="text-sm font-medium">
-              Description
-            </label>
-            <textarea
-              id="edit-block-description"
-              value={form.description}
-              onChange={(event) => setForm((prev) => ({ ...prev, description: event.target.value }))}
-              onPaste={handlePaste}
-              className={textareaClassName}
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label htmlFor="edit-block-role" className="text-sm font-medium">
-              Role
-            </label>
-            <Input
-              id="edit-block-role"
-              value={form.role}
-              onChange={(event) => setForm((prev) => ({ ...prev, role: event.target.value }))}
-              onPaste={handlePaste}
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label htmlFor="edit-block-time-period" className="text-sm font-medium">
-              Time Period
-            </label>
-            <Input
-              id="edit-block-time-period"
-              value={form.timePeriod}
-              onChange={(event) => setForm((prev) => ({ ...prev, timePeriod: event.target.value }))}
-              onPaste={handlePaste}
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label htmlFor="edit-block-environment" className="text-sm font-medium">
-              Environment (comma-separated)
-            </label>
-            <Input
-              id="edit-block-environment"
-              value={form.environment}
-              onChange={(event) => setForm((prev) => ({ ...prev, environment: event.target.value }))}
-              onPaste={handlePaste}
-            />
-          </div>
-          {otherFieldEntries.map(([key, value]) => (
-            <div key={key} className="flex flex-col gap-1">
-              <label htmlFor={`edit-block-other-${key}`} className="text-sm font-medium">
-                {titleCaseLabel(key)}
+        <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+            <div className="flex h-full flex-col gap-3">
+              <div className="flex flex-col gap-1">
+                <label htmlFor="edit-block-name" className="text-sm font-medium">
+                  Name
+                </label>
+                <Input
+                  id="edit-block-name"
+                  value={form.name}
+                  onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
+                  onPaste={handleNamePaste}
+                />
+              </div>
+              <div className="flex min-h-0 flex-1 flex-col gap-1">
+                <label htmlFor="edit-block-description" className="text-sm font-medium">
+                  Description
+                </label>
+                <textarea
+                  id="edit-block-description"
+                  value={form.description}
+                  onChange={(event) => setForm((prev) => ({ ...prev, description: event.target.value }))}
+                  className={textareaClassName}
+                />
+              </div>
+            </div>
+            <div className="flex h-full flex-col gap-1">
+              <label htmlFor="edit-block-metadata" className="text-sm font-medium">
+                Details (Role, Time Period, Environment, Responsibilities, ...)
               </label>
               <textarea
-                id={`edit-block-other-${key}`}
-                value={otherFieldToText(value)}
-                onChange={(event) => {
-                  const text = event.target.value;
-                  setForm((prev) => ({
-                    ...prev,
-                    otherFields: {
-                      ...prev.otherFields,
-                      [key]: Array.isArray(prev.otherFields[key]) ? text.split("\n") : text,
-                    },
-                  }));
-                }}
-                onPaste={handlePaste}
+                id="edit-block-metadata"
+                value={form.metadata}
+                onChange={(event) => setForm((prev) => ({ ...prev, metadata: event.target.value }))}
                 className={textareaClassName}
               />
             </div>
-          ))}
+          </div>
           {error && <p className="rounded-xl bg-destructive/10 px-3.5 py-2.5 text-sm text-destructive">{error}</p>}
           <div className="flex items-center justify-between gap-2">
             <Button type="button" variant="ghost" onClick={handleCopyFullBlock}>

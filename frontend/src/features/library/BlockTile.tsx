@@ -1,5 +1,5 @@
-import { Loader2, Pencil, RefreshCw, Shield, Trash2, X } from "lucide-react";
-import { OriginIcon, type BlockOrigin } from "@/shared/icons/OriginIcon";
+import { Pencil, RefreshCw, Shield, Trash2, X } from "lucide-react";
+import { GeneratingSpinner, OriginIcon, type BlockOrigin } from "@/shared/icons/OriginIcon";
 import type { PendingJob } from "@/features/library/useLibraryJobs";
 import { Button } from "@/shared/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
@@ -26,6 +26,7 @@ export function originFromCreatedBy(createdBy: string): BlockOrigin {
 interface BlockTileProps {
   block: LibraryBlockRecord;
   viewMode: LibraryViewMode;
+  onView?: () => void;
   onMutate?: () => void;
   onEdit?: () => void;
   onTogglePreserve?: () => void;
@@ -39,7 +40,7 @@ interface ControlSpec {
   handler?: () => void;
 }
 
-export function BlockTile({ block, viewMode, onMutate, onEdit, onTogglePreserve, onDelete }: BlockTileProps) {
+export function BlockTile({ block, viewMode, onView, onMutate, onEdit, onTogglePreserve, onDelete }: BlockTileProps) {
   const origin = originFromCreatedBy(block.created_by);
   const environmentText = block.environment.join(", ");
   const isList = viewMode === "list";
@@ -54,8 +55,17 @@ export function BlockTile({ block, viewMode, onMutate, onEdit, onTogglePreserve,
   return (
     <div
       data-testid="block-tile"
+      role="button"
+      tabIndex={0}
+      onClick={onView}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onView?.();
+        }
+      }}
       className={cn(
-        "flex overflow-hidden rounded-2xl border bg-card transition-shadow hover:shadow-md",
+        "flex cursor-pointer overflow-hidden rounded-2xl border bg-card transition-shadow hover:shadow-md",
         block.preserved ? "border-2 border-primary" : "border-border"
       )}
     >
@@ -67,14 +77,21 @@ export function BlockTile({ block, viewMode, onMutate, onEdit, onTogglePreserve,
       >
         <OriginIcon origin={origin} />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-foreground">{block.name}</p>
+          <p
+            className={cn(
+              "font-semibold text-foreground",
+              isList ? "truncate text-sm" : "line-clamp-3 text-base"
+            )}
+          >
+            {block.name}
+          </p>
           {environmentText && (
             <Tooltip>
               <TooltipTrigger
                 render={
                   <p
                     tabIndex={0}
-                    className="line-clamp-2 mt-1 text-xs leading-relaxed text-muted-foreground"
+                    className="line-clamp-2 mt-1 w-fit max-w-full cursor-help text-xs leading-relaxed text-muted-foreground underline decoration-dotted decoration-muted-foreground/40 underline-offset-2"
                     title={environmentText}
                   />
                 }
@@ -99,7 +116,10 @@ export function BlockTile({ block, viewMode, onMutate, onEdit, onTogglePreserve,
             variant="ghost"
             size={isList ? "icon-sm" : "sm"}
             disabled={!handler || (key === "delete" && block.preserved)}
-            onClick={handler}
+            onClick={(event) => {
+              event.stopPropagation();
+              handler?.();
+            }}
             aria-label={label}
             className={cn(
               !isList && "w-full justify-start gap-2 rounded-lg px-2 text-muted-foreground",
@@ -141,30 +161,27 @@ export function PendingBlockTile({ job, viewMode, onDismiss }: PendingBlockTileP
         isList ? "flex-row items-center" : "flex-col items-start"
       )}
     >
-      <div className={cn("flex min-w-0 flex-1 gap-3", isList ? "flex-row items-center" : "flex-col items-start")}>
-        <OriginIcon origin={origin} />
-        <div className="min-w-0 flex-1">
-          {isError ? (
-            <>
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        {isError ? (
+          <>
+            <OriginIcon origin={origin} />
+            <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-destructive">Failed</p>
               <p className="mt-1 text-xs text-muted-foreground">{job.errorMessage}</p>
-            </>
-          ) : (
-            <>
-              <p className="flex items-center gap-1.5 text-sm font-semibold">
-                <Loader2 className="size-3.5 animate-spin text-primary" />
-                Working...
-              </p>
-              {job.messages.length > 0 && (
-                <ul className="mt-1 text-xs text-muted-foreground">
-                  {job.messages.map((message, index) => (
-                    <li key={index}>{message}</li>
-                  ))}
-                </ul>
+            </div>
+          </>
+        ) : (
+          <>
+            <GeneratingSpinner origin={origin} />
+            <ul className="min-w-0 flex-1 text-xs text-muted-foreground">
+              {job.messages.length > 0 ? (
+                job.messages.map((message, index) => <li key={index}>{message}</li>)
+              ) : (
+                <li className="text-muted-foreground/70">Working…</li>
               )}
-            </>
-          )}
-        </div>
+            </ul>
+          </>
+        )}
       </div>
       {isError && (
         <div className={cn("flex shrink-0 gap-1", isList ? "flex-row" : "flex-col")}>

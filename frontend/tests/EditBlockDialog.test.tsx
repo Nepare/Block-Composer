@@ -33,6 +33,10 @@ const BLOCK_DETAIL = {
     "**Period:** 2022-2024",
     "",
     "**Environment:** Kubernetes, AWS",
+    "",
+    "**Responsibilities:**",
+    "- Designed the deployment pipeline",
+    "- Mentored two junior engineers",
   ].join("\n"),
   created_by: "manual",
   generation_criteria: null,
@@ -63,17 +67,21 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-test("opens pre-filled with the block's parsed fields", async () => {
+test("opens pre-filled with the block's name, description, and raw metadata", async () => {
   render(<EditBlockDialog blockId="block-1" open onOpenChange={vi.fn()} />);
 
   expect(await screen.findByDisplayValue("Platform Engineer")).toBeInTheDocument();
   expect(screen.getByDisplayValue("Runs the internal deployment platform.")).toBeInTheDocument();
-  expect(screen.getByDisplayValue("Platform Lead")).toBeInTheDocument();
-  expect(screen.getByDisplayValue("2022-2024")).toBeInTheDocument();
-  expect(screen.getByDisplayValue("Kubernetes, AWS")).toBeInTheDocument();
+
+  const metadata = screen.getByLabelText(/details/i) as HTMLTextAreaElement;
+  expect(metadata.value).toContain("**Role:** Platform Lead");
+  expect(metadata.value).toContain("**Period:** 2022-2024");
+  expect(metadata.value).toContain("**Environment:** Kubernetes, AWS");
+  expect(metadata.value).toContain("- Designed the deployment pipeline");
+  expect(metadata.value).toContain("- Mentored two junior engineers");
 });
 
-test("editing one field and saving calls updateBlock with the reassembled body", async () => {
+test("editing the details textarea and saving persists the raw markdown as-is", async () => {
   vi.mocked(api.updateBlock).mockResolvedValue({ ok: true } as Response);
   const onSaved = vi.fn();
   const user = userEvent.setup();
@@ -81,22 +89,22 @@ test("editing one field and saving calls updateBlock with the reassembled body",
   render(<EditBlockDialog blockId="block-1" open onOpenChange={vi.fn()} onSaved={onSaved} />);
   await screen.findByDisplayValue("Platform Engineer");
 
-  const roleInput = screen.getByLabelText(/^role$/i);
-  await user.clear(roleInput);
-  await user.type(roleInput, "Principal Engineer");
+  const metadata = screen.getByLabelText(/details/i);
+  await user.click(metadata);
+  await user.paste("**Role:** Principal Engineer");
 
   await user.click(screen.getByRole("button", { name: /save/i }));
 
   await waitFor(() => expect(api.updateBlock).toHaveBeenCalledTimes(1));
   const [id, payload] = vi.mocked(api.updateBlock).mock.calls[0];
   expect(id).toBe("block-1");
-  expect(payload.body).toContain("**Role:** Principal Engineer");
   expect(payload.body).toContain("# Platform Engineer");
-  expect(payload.body).toContain("**Environment:** Kubernetes, AWS");
+  expect(payload.body).toContain("Runs the internal deployment platform.");
+  expect(payload.body).toContain("**Role:** Principal Engineer");
   await waitFor(() => expect(onSaved).toHaveBeenCalled());
 });
 
-test("copy full block writes the reassembled markdown to the clipboard", async () => {
+test("copy full block writes the concatenated markdown to the clipboard", async () => {
   const user = userEvent.setup();
 
   render(<EditBlockDialog blockId="block-1" open onOpenChange={vi.fn()} />);
@@ -110,26 +118,27 @@ test("copy full block writes the reassembled markdown to the clipboard", async (
   expect(written).toContain("**Role:** Platform Lead");
   expect(written).toContain("**Period:** 2022-2024");
   expect(written).toContain("**Environment:** Kubernetes, AWS");
+  expect(written).toContain("- Designed the deployment pipeline");
 });
 
-test("pasting a whole block's text into a single field distributes it across all fields and toasts", async () => {
+test("pasting a whole block's text into Name distributes it across Name, Description, and Details, and toasts", async () => {
   const user = userEvent.setup();
 
   render(<EditBlockDialog blockId="block-1" open onOpenChange={vi.fn()} />);
-  const description = await screen.findByDisplayValue("Runs the internal deployment platform.");
+  const nameInput = await screen.findByDisplayValue("Platform Engineer");
 
-  await user.click(description);
+  await user.click(nameInput);
   await user.paste(WHOLE_BLOCK_TEXT);
 
   expect(await screen.findByDisplayValue("Backend Engineer")).toBeInTheDocument();
   expect(screen.getByDisplayValue("Owns the payments service.")).toBeInTheDocument();
-  expect(screen.getByDisplayValue("Backend Lead")).toBeInTheDocument();
-  expect(screen.getByDisplayValue("2019-2021")).toBeInTheDocument();
-  expect(screen.getByDisplayValue("Go, Postgres")).toBeInTheDocument();
+  const metadata = screen.getByLabelText(/details/i) as HTMLTextAreaElement;
+  expect(metadata.value).toContain("**Role:** Backend Lead");
+  expect(metadata.value).toContain("**Environment:** Go, Postgres");
   expect(toast.info).toHaveBeenCalled();
 });
 
-test("pasting ordinary text into one field lands only in that field", async () => {
+test("pasting ordinary text into Description lands only in that field, without redistributing", async () => {
   const user = userEvent.setup();
 
   render(<EditBlockDialog blockId="block-1" open onOpenChange={vi.fn()} />);
@@ -141,8 +150,5 @@ test("pasting ordinary text into one field lands only in that field", async () =
 
   expect(screen.getByDisplayValue("just fixing a typo here")).toBeInTheDocument();
   expect(screen.getByDisplayValue("Platform Engineer")).toBeInTheDocument();
-  expect(screen.getByDisplayValue("Platform Lead")).toBeInTheDocument();
-  expect(screen.getByDisplayValue("2022-2024")).toBeInTheDocument();
-  expect(screen.getByDisplayValue("Kubernetes, AWS")).toBeInTheDocument();
   expect(toast.info).not.toHaveBeenCalled();
 });

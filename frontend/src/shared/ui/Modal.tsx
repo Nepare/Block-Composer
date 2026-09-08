@@ -13,13 +13,14 @@ interface ModalProps {
   onOpenChange: (open: boolean) => void
   title: ReactNode
   description?: string
+  contentClassName?: string
   children?: ReactNode
 }
 
-function Modal({ open, onOpenChange, title, description, children }: ModalProps) {
+function Modal({ open, onOpenChange, title, description, contentClassName, children }: ModalProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className={contentClassName}>
         <DialogHeader className="border-b pb-4">
           <DialogTitle className="text-base font-semibold">{title}</DialogTitle>
           {description && <DialogDescription>{description}</DialogDescription>}

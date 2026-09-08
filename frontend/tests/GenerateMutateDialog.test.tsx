@@ -112,7 +112,7 @@ test("submitting calls startGenerate and the dialog is gone from the DOM right a
   });
 });
 
-test("mutate mode shows the source block's content read-only", async () => {
+test("mutate mode shows the source block's project and description read-only", async () => {
   vi.mocked(api.getBlock).mockResolvedValue({
     id: "block-1",
     name: "Platform Engineer",
@@ -121,7 +121,7 @@ test("mutate mode shows the source block's content read-only", async () => {
     source: "manual",
     created_at: null,
     preserved: false,
-    body: "**Role:** Platform Engineer\n**Environment:** Kubernetes, AWS",
+    body: "# Platform Engineer\nBuilds scalable platform tooling.\n**Role:** Platform Engineer\n**Environment:** Kubernetes, AWS",
     created_by: "manual",
     generation_criteria: null,
     mutated_from: null,
@@ -139,10 +139,8 @@ test("mutate mode shows the source block's content read-only", async () => {
 
   expect(screen.getByText("Platform Engineer")).toBeInTheDocument();
 
-  const sourceContent = await screen.findByLabelText(/source block content/i);
-  await waitFor(() => expect(sourceContent).toHaveValue("**Role:** Platform Engineer\n**Environment:** Kubernetes, AWS"));
-  expect(sourceContent.tagName).toBe("TEXTAREA");
-  expect(sourceContent).toBeDisabled();
+  await waitFor(() => expect(screen.getByText("Builds scalable platform tooling.")).toBeInTheDocument());
+  expect(screen.queryByLabelText(/source block content/i)).not.toBeInTheDocument();
 });
 
 test("mutate mode submits with the source block's id and closes immediately without waiting on job resolution", async () => {

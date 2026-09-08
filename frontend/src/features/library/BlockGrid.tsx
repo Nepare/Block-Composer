@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FileText, Plus, Search } from "lucide-react";
+import { FileText, Grid2x2, Grid3x3, List, Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   clearBlocks,
@@ -16,18 +16,20 @@ import { ConfirmDialog } from "@/features/library/ConfirmDialog";
 import { DissectDialog } from "@/features/library/DissectDialog";
 import { EditBlockDialog } from "@/features/library/EditBlockDialog";
 import { GenerateMutateDialog } from "@/features/library/GenerateMutateDialog";
+import { ViewBlockDialog } from "@/features/library/ViewBlockDialog";
 import type { JobKind, PendingJob, StartJobMeta } from "@/features/library/useLibraryJobs";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
+import { Spinner } from "@/shared/ui/Spinner";
 import { cn } from "@/shared/lib/utils";
 
 const VIEW_STORAGE_KEY = "cvdocs.libraryView";
 const DELETE_WARNING_KEY = "cvdocs.skipDeleteWarning";
 
-const VIEW_MODES: { value: LibraryViewMode; label: string }[] = [
-  { value: "list", label: "List" },
-  { value: "grid-2", label: "2-column" },
-  { value: "grid-3", label: "3-column" },
+const VIEW_MODES: { value: LibraryViewMode; label: string; icon: typeof List }[] = [
+  { value: "list", label: "List", icon: List },
+  { value: "grid-2", label: "2-column", icon: Grid2x2 },
+  { value: "grid-3", label: "3-column", icon: Grid3x3 },
 ];
 
 const FIELD_RE = /^\*\*(.+?):\*\*\s*(.*)$/;
@@ -111,6 +113,7 @@ export function BlockGrid({
   const [viewMode, setViewMode] = useState<LibraryViewMode>(() => loadStoredViewMode());
   const [generateOpen, setGenerateOpen] = useState(false);
   const [mutateBlockId, setMutateBlockId] = useState<string | null>(null);
+  const [viewBlockId, setViewBlockId] = useState<string | null>(null);
   const [editBlockId, setEditBlockId] = useState<string | null>(null);
   const [deleteBlockId, setDeleteBlockId] = useState<string | null>(null);
   const [clearOpen, setClearOpen] = useState(false);
@@ -228,7 +231,7 @@ export function BlockGrid({
               aria-label="Search blocks"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              className="pl-8"
+              className="bg-background pl-8"
             />
           </div>
           <div
@@ -236,16 +239,18 @@ export function BlockGrid({
             role="group"
             aria-label="View mode"
           >
-            {VIEW_MODES.map(({ value, label }) => (
+            {VIEW_MODES.map(({ value, label, icon: Icon }) => (
               <Button
                 key={value}
                 type="button"
                 variant={viewMode === value ? "secondary" : "ghost"}
-                size="sm"
+                size="icon-sm"
                 aria-pressed={viewMode === value}
+                aria-label={label}
+                title={label}
                 onClick={() => selectViewMode(value)}
               >
-                {label}
+                <Icon />
               </Button>
             ))}
           </div>
@@ -256,17 +261,25 @@ export function BlockGrid({
           type="button"
           variant="outline"
           onClick={() => setDissectOpen(true)}
-          className="flex-1 justify-center gap-2.5 border-dashed py-5 text-muted-foreground hover:border-primary/40 hover:text-primary"
+          className="flex-1 justify-center gap-2.5 border-2 border-dashed border-primary/40 py-5 text-muted-foreground hover:border-primary/70 hover:text-primary"
         >
           <FileText className="size-4 text-primary" />
           Populate the library from Google Docs
         </Button>
-        <Button type="button" variant="ghost" size="sm" onClick={() => setClearOpen(true)}>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setClearOpen(true)}
+          className="gap-2 border-2 border-destructive py-5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+        >
+          <Trash2 className="size-4" />
           Clear library
         </Button>
       </div>
       {loading ? (
-        <p className="text-muted-foreground">Loading library...</p>
+        <p className="flex items-center gap-2 text-muted-foreground">
+          <Spinner /> Loading library...
+        </p>
       ) : (
         <>
           <div className={gridClassName}>
@@ -275,7 +288,7 @@ export function BlockGrid({
               onClick={() => setGenerateOpen(true)}
               aria-label="Generate a new block"
               className={cn(
-                "flex items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-primary/30 bg-transparent p-3 text-sm font-semibold text-primary transition-colors hover:border-primary/60 hover:bg-primary/5",
+                "flex items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-primary/30 bg-card p-3 text-sm font-semibold text-primary transition-colors hover:border-primary/60 hover:bg-primary/5",
                 viewMode === "list" ? "flex-row py-3" : "flex-col py-8"
               )}
             >
@@ -295,6 +308,7 @@ export function BlockGrid({
                 key={block.id}
                 block={block}
                 viewMode={viewMode}
+                onView={() => setViewBlockId(block.id)}
                 onMutate={() => setMutateBlockId(block.id)}
                 onEdit={() => setEditBlockId(block.id)}
                 onTogglePreserve={() => handleTogglePreserve(block)}
@@ -324,6 +338,19 @@ export function BlockGrid({
             if (!next) setMutateBlockId(null);
           }}
           onJobStarted={(kind, jobId) => onJobStarted?.(kind, jobId)}
+        />
+      )}
+      {viewBlockId && (
+        <ViewBlockDialog
+          blockId={viewBlockId}
+          open={viewBlockId !== null}
+          onOpenChange={(next) => {
+            if (!next) setViewBlockId(null);
+          }}
+          onEdit={() => {
+            setEditBlockId(viewBlockId);
+            setViewBlockId(null);
+          }}
         />
       )}
       {editBlockId && (
