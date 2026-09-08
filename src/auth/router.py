@@ -21,3 +21,11 @@ def get_auth_provider(settings: Settings) -> AuthProvider:
         storage = SqliteCredentialsStorage(settings.storage_db_path)
         return WebAuthProvider(settings, storage)
     raise ConfigError(f"Unknown storage backend {settings.path.storage.backend!r}.")
+
+
+def get_web_auth_provider(settings: Settings) -> WebAuthProvider:
+    """The hosted web app's own OAuth routes always need WebAuthProvider — it's the only
+    provider with build_authorization_url/exchange_code — regardless of path.storage.backend,
+    which governs unrelated block/result storage."""
+    storage = SqliteCredentialsStorage(settings.storage_db_path)
+    return WebAuthProvider(settings, storage)

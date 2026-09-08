@@ -13,8 +13,7 @@ from tools import dissect as dissect_module
 from tools import generate as generate_module
 from tools import mutate as mutate_module
 from web import web_jobs
-from auth.router import get_auth_provider
-from auth.web import WebAuthProvider
+from auth.router import get_web_auth_provider
 from core.config import Settings, load_settings
 from core.errors import AuthError, BlockNotFoundError, CvdocsError
 from core.naming import validate_explicit_name
@@ -46,11 +45,7 @@ def auth_google_login(key: str):
     if not _authorized(settings, key):
         return PlainTextResponse("Unauthorized", status_code=401)
 
-    provider = get_auth_provider(settings)
-    if not isinstance(provider, WebAuthProvider):
-        return PlainTextResponse(
-            "This deployment is not configured for hosted-mode connections.", status_code=400
-        )
+    provider = get_web_auth_provider(settings)
 
     state, code_verifier = SqlitePendingSignInStore(settings.storage_db_path).start()
     url = provider.build_authorization_url(state, code_verifier)
@@ -70,11 +65,7 @@ def auth_google_callback(code: str | None = None, state: str | None = None, erro
             "<p>This sign-in link has expired or was already used.</p>", status_code=400
         )
 
-    provider = get_auth_provider(settings)
-    if not isinstance(provider, WebAuthProvider):
-        return PlainTextResponse(
-            "This deployment is not configured for hosted-mode connections.", status_code=400
-        )
+    provider = get_web_auth_provider(settings)
 
     try:
         creds = provider.exchange_code(code, code_verifier)
@@ -84,6 +75,15 @@ def auth_google_callback(code: str | None = None, state: str | None = None, erro
 
     provider.storage.save(creds)
     return HTMLResponse("<p>Connected successfully. You can close this window.</p>")
+
+
+@app.get("/auth/google/status")
+def auth_google_status(key: str):
+    settings = load_settings()
+    if not _authorized(settings, key):
+        return PlainTextResponse("Unauthorized", status_code=401)
+    connected, _scopes = get_web_auth_provider(settings).status()
+    return {"connected": connected}
 
 
 class GenerateStartRequest(BaseModel):
@@ -317,11 +317,7 @@ def dissect_start(payload: DissectStartRequest, key: str):
     if not payload.doc.strip():
         return PlainTextResponse("doc must not be empty.", status_code=400)
 
-    provider = get_auth_provider(settings)
-    if not isinstance(provider, WebAuthProvider):
-        return PlainTextResponse(
-            "This deployment is not configured for hosted-mode connections.", status_code=400
-        )
+    provider = get_web_auth_provider(settings)
     try:
         provider.get_credentials()
     except AuthError as exc:

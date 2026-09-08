@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { startDissect } from "@/features/library/api";
+import { useGoogleAuthStatus } from "@/features/library/useGoogleAuthStatus";
 import * as session from "@/shared/session";
 import { Modal } from "@/shared/ui/Modal";
 import { Button } from "@/shared/ui/button";
@@ -27,6 +28,7 @@ export function DissectDialog({ open, onOpenChange, onJobStarted }: DissectDialo
   const [preserve, setPreserve] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { connected, checking, startPolling } = useGoogleAuthStatus(open);
 
   const valid = isValidDocReference(doc);
 
@@ -39,6 +41,7 @@ export function DissectDialog({ open, onOpenChange, onJobStarted }: DissectDialo
   function handleConnect() {
     const url = `/auth/google/login?key=${encodeURIComponent(session.get() ?? "")}`;
     window.open(url, "_blank");
+    startPolling();
   }
 
   async function handleSubmit(event: FormEvent) {
@@ -50,7 +53,8 @@ export function DissectDialog({ open, onOpenChange, onJobStarted }: DissectDialo
     try {
       const response = await startDissect({ doc });
       if (!response.ok) {
-        setError("Could not start the import. Please try again.");
+        const text = await response.text();
+        setError(text || "Could not start the import. Please try again.");
         return;
       }
       const { job_id } = (await response.json()) as { job_id: string };
@@ -73,9 +77,15 @@ export function DissectDialog({ open, onOpenChange, onJobStarted }: DissectDialo
       description="Import blocks from a Google Doc. Closing this dialog does not stop the import."
     >
       <div className="flex flex-col gap-4">
-        <Button type="button" variant="outline" onClick={handleConnect}>
-          Connect Google Account
-        </Button>
+        {connected ? (
+          <p className="text-sm font-medium">Connected</p>
+        ) : (
+          !checking && (
+            <Button type="button" variant="outline" onClick={handleConnect}>
+              Connect Google Account
+            </Button>
+          )
+        )}
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <div className="flex flex-col gap-1">
             <label htmlFor="dissect-doc" className="text-sm font-medium">

@@ -26,6 +26,12 @@ class WebAuthProvider:
             return creds
         raise AuthError("Stored credentials are invalid — reconnect via the Google OAuth web flow.")
 
+    def status(self) -> tuple[bool, list[str]]:
+        creds = self.storage.load()
+        if creds is None:
+            return False, []
+        return creds.valid, list(creds.scopes or [])
+
     def build_authorization_url(self, state: str, code_verifier: str) -> str:
         flow = self._flow(code_verifier)
         url, _ = flow.authorization_url(access_type="offline", state=state, prompt="consent")

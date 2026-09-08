@@ -152,3 +152,26 @@ def test_get_credentials_refreshes_and_persists_an_expired_token(settings):
 
     assert result.token == "fresh"
     assert storage.saved == [creds]
+
+
+def test_status_with_no_stored_token_returns_false_and_empty_scopes(settings):
+    provider = WebAuthProvider(settings, FakeCredentialsStorage(None))
+
+    assert provider.status() == (False, [])
+
+
+def test_status_with_valid_stored_token_returns_true_and_scopes(settings):
+    creds = Credentials(
+        token="valid",
+        refresh_token="r",
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id="x",
+        client_secret="y",
+        scopes=settings.auth.google.scopes,
+    )
+    provider = WebAuthProvider(settings, FakeCredentialsStorage(creds))
+
+    valid, scopes = provider.status()
+
+    assert valid is True
+    assert scopes == list(settings.auth.google.scopes)

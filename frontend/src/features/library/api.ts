@@ -58,6 +58,10 @@ export interface DissectStartPayload {
   doc: string;
 }
 
+export interface GoogleAuthStatus {
+  connected: boolean;
+}
+
 export interface JobStartResult {
   job_id: string;
 }
@@ -119,6 +123,11 @@ export function startDissect(payload: DissectStartPayload): Promise<Response> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+}
+
+export async function getGoogleAuthStatus(): Promise<GoogleAuthStatus> {
+  const response = await apiFetch("/auth/google/status");
+  return response.json();
 }
 
 export function streamUrl(jobId: string): string {

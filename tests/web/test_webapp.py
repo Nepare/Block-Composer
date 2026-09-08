@@ -166,7 +166,7 @@ def test_dissect_start_runs_in_background_and_saves(settings, monkeypatch, fake_
     document = _load_dissect_fixture()
     monkeypatch.setattr(docs_api, "get_document", lambda doc_id, settings=None: document)
     client = _client(settings, monkeypatch)
-    monkeypatch.setattr(webapp, "get_auth_provider", lambda s: _connected_provider(s))
+    monkeypatch.setattr(webapp, "get_web_auth_provider", lambda s: _connected_provider(s))
     fake_router(dissect_module, FakeLLMClient())  # naming client must not be called -- no conflicts
 
     response = client.post(
@@ -191,7 +191,7 @@ def test_dissect_start_second_pass_reports_duplicates(settings, monkeypatch, fak
     document = _load_dissect_fixture()
     monkeypatch.setattr(docs_api, "get_document", lambda doc_id, settings=None: document)
     client = _client(settings, monkeypatch)
-    monkeypatch.setattr(webapp, "get_auth_provider", lambda s: _connected_provider(s))
+    monkeypatch.setattr(webapp, "get_web_auth_provider", lambda s: _connected_provider(s))
     fake_router(dissect_module, FakeLLMClient())
 
     first = client.post("/dissect/start", params={"key": "test-key"}, json={"doc": "doc1"})
@@ -209,7 +209,7 @@ def test_dissect_stream_delivers_progress_then_done_outcome(settings, monkeypatc
     document = _load_dissect_fixture()
     monkeypatch.setattr(docs_api, "get_document", lambda doc_id, settings=None: document)
     client = _client(settings, monkeypatch)
-    monkeypatch.setattr(webapp, "get_auth_provider", lambda s: _connected_provider(s))
+    monkeypatch.setattr(webapp, "get_web_auth_provider", lambda s: _connected_provider(s))
     fake_router(dissect_module, FakeLLMClient())
 
     start = client.post("/dissect/start", params={"key": "test-key"}, json={"doc": "doc1"})
@@ -234,15 +234,22 @@ def test_dissect_start_rejects_empty_doc(settings, monkeypatch):
     assert len(web_jobs._jobs) == jobs_before
 
 
-def test_dissect_start_rejects_when_not_configured_for_hosted_mode(settings, monkeypatch):
+def test_dissect_start_no_longer_depends_on_storage_backend(settings, monkeypatch, tmp_path):
+    """Regression: dissect_start used to pick its auth provider off path.storage.backend
+    (get_auth_provider), so a filesystem-backend deployment got InstalledAppAuthProvider — which
+    lacks the web OAuth methods entirely — and 400'd with "not configured for hosted-mode"
+    before ever checking whether a Google account was connected. It must now always use
+    WebAuthProvider (get_web_auth_provider) regardless of that flag."""
+    settings.path.storage.backend = "filesystem"
+    settings.path.storage.sqlite_path = str(tmp_path / "creds.db")
     client = _client(settings, monkeypatch)
     jobs_before = len(web_jobs._jobs)
-    monkeypatch.setattr(webapp, "get_auth_provider", lambda s: object())
 
     response = client.post("/dissect/start", params={"key": "test-key"}, json={"doc": "doc1"})
 
     assert response.status_code == 400
-    assert "not configured" in response.text
+    assert "not configured" not in response.text
+    assert "not connected" in response.text.lower()
     assert len(web_jobs._jobs) == jobs_before
 
 
@@ -250,7 +257,7 @@ def test_dissect_start_rejects_when_not_connected(settings, monkeypatch):
     client = _client(settings, monkeypatch)
     jobs_before = len(web_jobs._jobs)
     monkeypatch.setattr(
-        webapp, "get_auth_provider", lambda s: WebAuthProvider(s, FakeCredentialsStorage(None))
+        webapp, "get_web_auth_provider", lambda s: WebAuthProvider(s, FakeCredentialsStorage(None))
     )
 
     response = client.post("/dissect/start", params={"key": "test-key"}, json={"doc": "doc1"})
@@ -787,6 +794,55 @@ def test_auth_google_login_rejects_missing_key(settings, monkeypatch):
     assert response.status_code == 422
 
 
+def test_auth_google_login_redirects_regardless_of_storage_backend(settings, monkeypatch, tmp_path):
+    settings.path.storage.backend = "filesystem"
+    settings.path.storage.sqlite_path = str(tmp_path / "creds.db")
+    client = _client(settings, monkeypatch)
+
+    response = client.get("/auth/google/login", params={"key": "test-key"}, follow_redirects=False)
+
+    assert response.status_code == 302
+    assert "not configured" not in response.text
+
+
+def test_auth_google_status_rejects_missing_key(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+
+    response = client.get("/auth/google/status")
+
+    assert response.status_code == 422
+
+
+def test_auth_google_status_rejects_wrong_key(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+
+    response = client.get("/auth/google/status", params={"key": "wrong-key"})
+
+    assert response.status_code == 401
+
+
+def test_auth_google_status_reports_connected_true(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+    monkeypatch.setattr(webapp, "get_web_auth_provider", lambda s: _connected_provider(s))
+
+    response = client.get("/auth/google/status", params={"key": "test-key"})
+
+    assert response.status_code == 200
+    assert response.json() == {"connected": True}
+
+
+def test_auth_google_status_reports_connected_false(settings, monkeypatch):
+    client = _client(settings, monkeypatch)
+    monkeypatch.setattr(
+        webapp, "get_web_auth_provider", lambda s: WebAuthProvider(s, FakeCredentialsStorage(None))
+    )
+
+    response = client.get("/auth/google/status", params={"key": "test-key"})
+
+    assert response.status_code == 200
+    assert response.json() == {"connected": False}
+
+
 def test_stream_route_behaves_identically_across_all_three_tools(settings, monkeypatch, fake_router):
     client = _client(settings, monkeypatch)
 
@@ -818,7 +874,7 @@ def test_stream_route_behaves_identically_across_all_three_tools(settings, monke
 
     document = _load_dissect_fixture()
     monkeypatch.setattr(docs_api, "get_document", lambda doc_id, settings=None: document)
-    monkeypatch.setattr(webapp, "get_auth_provider", lambda s: _connected_provider(s))
+    monkeypatch.setattr(webapp, "get_web_auth_provider", lambda s: _connected_provider(s))
     fake_router(dissect_module, FakeLLMClient())
     dis_start = client.post("/dissect/start", params={"key": "test-key"}, json={"doc": "doc1"})
     dis_job_id = dis_start.json()["job_id"]
@@ -866,7 +922,7 @@ def test_stream_and_cancel_behave_consistently_across_all_four_tools(settings, m
 
     document = _load_dissect_fixture()
     monkeypatch.setattr(docs_api, "get_document", lambda doc_id, settings=None: document)
-    monkeypatch.setattr(webapp, "get_auth_provider", lambda s: _connected_provider(s))
+    monkeypatch.setattr(webapp, "get_web_auth_provider", lambda s: _connected_provider(s))
     fake_router(dissect_module, FakeLLMClient())
     dis_start = client.post("/dissect/start", params={"key": "test-key"}, json={"doc": "doc1"})
     dis_job_id = dis_start.json()["job_id"]
