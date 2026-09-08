@@ -11,3 +11,6 @@ Add negative constraints here as you find you need them, e.g.:
 - Try keeping the overall structure the same. We are mutating an existing project, not generating something from scratch, most responsibilities, most of the description and most of the environment should stay the same.
 - Keep the product description that the users see largely unchanged. Your mutating scope is mostly over responsibilities and environment.
 - Try to keep the responsibilities, project name, project description and environment in sync. If you mutate some responsibility to include a new technology and remove an old one, make sure it's changed in the environment too, and make sure project description aligns with it.
+- When mutating environment, don't explain yourself, don't include anything in the brackets. This section is for precise technologies only.
+<bad_example>Google Test (for legacy C++ tests)</bad_example>
+<good_example>Google Test</good_example>
