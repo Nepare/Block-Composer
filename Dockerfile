@@ -15,9 +15,10 @@ COPY src/ src/
 COPY config.yaml ./
 COPY templates.yaml ./
 COPY input_prompts/ input_prompts/
-COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
 RUN pip install --no-cache-dir .
+
+COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
 EXPOSE 8000
 
