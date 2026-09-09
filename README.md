@@ -7,13 +7,18 @@ from a natural-language request by reusing, adapting, or generating blocks as ne
 
 ## Requirements
 
-- Python 3.11+
 - A Google account that can view the source Doc(s) you want to dissect
 - A free [OpenRouter](https://openrouter.ai) account (for `generate`/`mutate`/`compose`)
-- Optionally, [Ollama](https://ollama.com) installed locally (used by default for the
-  cheap `naming` task — see [Configuration](#configuration))
+
+Whether you need to use the app via a Web GUI or local CLI, you'll need:
+
+- **Local CLI** — Python 3.11+. Optionally, [Ollama](https://ollama.com) installed locally
+  (used by default for the cheap `naming` nad `keywords` tasks — see [Configuration](#configuration)).
+- **Hosted deployment** — [Docker](https://www.docker.com) (with Compose).
 
 ## Install
+
+### Local CLI
 
 ```
 python -m venv .venv
@@ -23,6 +28,12 @@ pip install -e ".[dev]"
 
 This installs the `cvdocs` command into your virtual environment (see `pyproject.toml` for
 the exact dependency list — there's no separate `requirements.txt`).
+
+### Hosted deployment (Docker)
+
+No install step — `docker compose build` (covered in [Usage](#usage) below) builds the image
+from the `Dockerfile`, pulling everything it needs (Python, Ollama, dependencies) inside the
+container.
 
 ## Setup
 
