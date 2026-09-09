@@ -1,13 +1,27 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ChevronLeft, ChevronRight, Plus, Shield, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { ClearResultsResult, ResultSummary } from "@/features/compose/api";
 import type { DisplayMode } from "@/features/compose/types";
 import { Button } from "@/shared/ui/button";
 import { ConfirmDialog } from "@/shared/ui/ConfirmDialog";
+import { Spinner } from "@/shared/ui/Spinner";
 import { cn } from "@/shared/lib/utils";
 
 const DELETE_WARNING_KEY = "cvdocs.skipComposeDeleteWarning";
+const DOTS_CYCLE_MS = 400;
+
+function useCyclingDots(active: boolean): string {
+  const [count, setCount] = useState(1);
+
+  useEffect(() => {
+    if (!active) return;
+    const interval = setInterval(() => setCount((prev) => (prev % 3) + 1), DOTS_CYCLE_MS);
+    return () => clearInterval(interval);
+  }, [active]);
+
+  return ".".repeat(count);
+}
 
 interface HistorySidebarProps {
   summaries: ResultSummary[];
@@ -15,6 +29,7 @@ interface HistorySidebarProps {
   displayMode: DisplayMode;
   onSelect: (resultId: string) => void;
   isComposeRunning: boolean;
+  isPending: boolean;
   onNewComposition: () => void;
   onBackToLive: () => void;
   onRename: (id: string, name: string) => Promise<boolean>;
@@ -30,6 +45,7 @@ export function HistorySidebar({
   displayMode,
   onSelect,
   isComposeRunning,
+  isPending,
   onNewComposition,
   onBackToLive,
   onRename,
@@ -46,6 +62,7 @@ export function HistorySidebar({
   const editLockRef = useRef(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [clearOpen, setClearOpen] = useState(false);
+  const pendingDots = useCyclingDots(isPending);
 
   function startEdit(summary: ResultSummary) {
     editLockRef.current = false;
@@ -139,8 +156,17 @@ export function HistorySidebar({
           )}
           <div className="flex flex-1 flex-col gap-1 overflow-y-auto p-2">
             {loading && <p className="p-2 text-sm text-muted-foreground">Loading...</p>}
-            {!loading && summaries.length === 0 && (
+            {!loading && !isPending && summaries.length === 0 && (
               <p className="p-2 text-sm text-muted-foreground">No compositions yet.</p>
+            )}
+            {isPending && (
+              <div
+                data-testid="history-pending-entry"
+                className="flex items-center gap-2 rounded-lg border border-transparent bg-muted px-2.5 py-2 text-sm font-medium"
+              >
+                <Spinner />
+                <span className="text-muted-foreground">{pendingDots}</span>
+              </div>
             )}
             {summaries.map((summary) => {
               const isActive = displayMode.type === "history" && displayMode.resultId === summary.id;

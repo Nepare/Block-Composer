@@ -2,6 +2,7 @@
 the CLI/local default; save()/save_with_dedup() return a stem, not a Path, since other
 backends have none to give."""
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 import frontmatter
@@ -12,6 +13,9 @@ from core.filelock import file_lock
 from models.blocks import Block
 from core.errors import BlockNotFoundError
 from storage.base import ClearResult, Result
+
+# Sentinel for a missing created_at so it sorts as the oldest possible item under DESC.
+_MIN_CREATED_AT = datetime.min.replace(tzinfo=timezone.utc)
 
 
 class FilesystemBlockStorage:
@@ -71,10 +75,13 @@ class FilesystemBlockStorage:
         return ClearResult(deleted=deleted, skipped_preserved=skipped)
 
     def all(self) -> list[Block]:
-        return [
+        items = [
             Block.from_post(frontmatter.load(str(p)), default_id=p.stem)
             for p in sorted(self.root.glob("*.md"))
         ]
+        # sorted() is stable, so items sharing a created_at (missing included) keep the
+        # path-ascending order they were loaded in above.
+        return sorted(items, key=lambda b: b.created_at or _MIN_CREATED_AT, reverse=True)
 
     def siblings(self, base_slug: str) -> list[Block]:
         """Every block sharing a base slug: `<base_slug>.md` and `<base_slug>_mut_x.md`."""
@@ -197,7 +204,10 @@ class FilesystemResultStorage:
         return ClearResult(deleted=deleted, skipped_preserved=skipped)
 
     def all(self) -> list[Result]:
-        return [self.load(p.stem) for p in sorted(self.root.glob("*.md"))]
+        items = [self.load(p.stem) for p in sorted(self.root.glob("*.md"))]
+        # sorted() is stable, so items sharing a created_at (missing included) keep the
+        # path-ascending order they were loaded in above.
+        return sorted(items, key=lambda r: r.created_at or _MIN_CREATED_AT, reverse=True)
 
     def siblings(self, base_slug: str) -> list[Result]:
         out = []

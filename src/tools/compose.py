@@ -436,6 +436,7 @@ def run_compose(
                     {"order": s.order, "action": s.action, "block_id": s.block_id, "criteria": s.criteria}
                     for s in sorted(all_slots, key=lambda s: s.order)
                 ]
+                + [{"order": len(all_slots) + 1, "action": "finalize", "block_id": None, "criteria": None}]
             },
         )
     )
@@ -550,6 +551,9 @@ def run_compose(
     bodies = [store.load(s.resolved_id).body.strip() for s in ordered if s.resolved_id]
     content = "\n\n---\n\n".join(bodies)
 
+    progress(
+        ProgressEvent(kind="finalize_start", message="", step=len(all_slots) + 1, total=len(all_slots) + 1)
+    )
     progress(ProgressEvent(kind="naming", message="Naming result…"))
     result_id, name, result_path = _save_result(
         content,
@@ -561,6 +565,9 @@ def run_compose(
         name=name,
         explicit_base=explicit_base,
         preserve=preserve,
+    )
+    progress(
+        ProgressEvent(kind="finalize_done", message="", step=len(all_slots) + 1, total=len(all_slots) + 1)
     )
     return ComposeOutcome(
         slots=ordered, result_path=result_path, result_id=result_id, name=name, content=content, cancelled=False

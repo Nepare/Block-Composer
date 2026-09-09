@@ -7,6 +7,7 @@ const ACTION_LABELS: Record<PlanStep["action"], string> = {
   use: "Use existing block",
   mutate: "Mutate block",
   generate: "Generate new block",
+  finalize: "Finalizing",
 };
 
 interface ComposePlanProps {

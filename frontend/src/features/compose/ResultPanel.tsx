@@ -1,10 +1,10 @@
 import { ComposePlan } from "@/features/compose/ComposePlan";
-import type { PlanStep, UseComposeJobResult } from "@/features/compose/useComposeJob";
-import type { ResultDetail } from "@/features/compose/api";
+import type { UseComposeJobResult } from "@/features/compose/useComposeJob";
+import type { ResultDetail, ResultSlot } from "@/features/compose/api";
 import type { DisplayMode } from "@/features/compose/types";
 import { Button } from "@/shared/ui/button";
 
-const ACTION_LABELS: Record<PlanStep["action"], string> = {
+const ACTION_LABELS: Record<ResultSlot["action"], string> = {
   use: "Used existing block",
   mutate: "Mutated block",
   generate: "Generated new block",
@@ -74,7 +74,7 @@ export function ResultPanel({ composeJob, displayMode, historyDetail = null }: R
             Cancel
           </Button>
         </div>
-        {composeJob.planSteps.length === 0 && composeJob.messages.length > 0 && (
+        {composeJob.messages.length > 0 && (
           <p className="text-sm text-muted-foreground">{composeJob.messages[composeJob.messages.length - 1]}</p>
         )}
         <ComposePlan planSteps={composeJob.planSteps} />

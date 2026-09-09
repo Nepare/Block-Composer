@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { HistorySidebar } from "@/features/compose/HistorySidebar";
@@ -28,6 +28,7 @@ function summary(overrides: Partial<ResultSummary> = {}): ResultSummary {
 function Harness({
   initialSummaries,
   isComposeRunning = false,
+  isPending = false,
   displayMode = { type: "fresh" },
   onSelect = vi.fn(),
   onNewComposition = vi.fn(),
@@ -40,6 +41,7 @@ function Harness({
 }: {
   initialSummaries: ResultSummary[];
   isComposeRunning?: boolean;
+  isPending?: boolean;
   displayMode?: DisplayMode;
   onSelect?: (id: string) => void;
   onNewComposition?: () => void;
@@ -85,6 +87,7 @@ function Harness({
       displayMode={displayMode}
       onSelect={onSelect}
       isComposeRunning={isComposeRunning}
+      isPending={isPending}
       onNewComposition={onNewComposition}
       onBackToLive={onBackToLive}
       onRename={onRename}
@@ -207,4 +210,54 @@ test("'Clear history' always shows its warning regardless of per-entry suppressi
   await waitFor(() => expect(screen.queryByText("First")).not.toBeInTheDocument());
   expect(screen.getByText("Second")).toBeInTheDocument();
   expect(toast.success).toHaveBeenCalledWith("Cleared 2 composition(s), kept 1 preserved.");
+});
+
+test("isPending renders an inert, active-styled entry above every real entry, with no click handler or controls", async () => {
+  const user = userEvent.setup();
+  const onSelect = vi.fn();
+  render(
+    <Harness
+      initialSummaries={[summary({ id: "r1", name: "First" }), summary({ id: "r2", name: "Second" })]}
+      isPending
+      onSelect={onSelect}
+    />
+  );
+
+  const pendingEntry = screen.getByTestId("history-pending-entry");
+  const allEntries = screen.getAllByTestId(/history-(pending-)?entry/);
+  expect(allEntries[0]).toBe(pendingEntry);
+  expect(allEntries).toHaveLength(3);
+
+  expect(within(pendingEntry).queryAllByRole("button")).toHaveLength(0);
+  expect(pendingEntry).toHaveClass("bg-muted", "font-medium");
+  expect(pendingEntry.querySelector("svg")).toBeInTheDocument();
+
+  await user.click(pendingEntry);
+  expect(onSelect).not.toHaveBeenCalled();
+});
+
+test("isPending's dots label cycles through '.', '..', '...' on an interval", async () => {
+  vi.useFakeTimers();
+  render(<Harness initialSummaries={[]} isPending />);
+
+  const pendingEntry = screen.getByTestId("history-pending-entry");
+  expect(pendingEntry).toHaveTextContent(".");
+  expect(pendingEntry).not.toHaveTextContent("..");
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(400);
+  });
+  expect(pendingEntry.textContent).toBe("..");
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(400);
+  });
+  expect(pendingEntry.textContent).toBe("...");
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(400);
+  });
+  expect(pendingEntry.textContent).toBe(".");
+
+  vi.useRealTimers();
 });

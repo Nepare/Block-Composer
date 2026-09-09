@@ -188,3 +188,52 @@ test("'New Composition' clicked from an already-fresh state clears name, descrip
   expect(screen.getByRole("checkbox", { name: /restrict generation/i })).not.toBeChecked();
   expect(screen.getByRole("checkbox", { name: /restrict mutation/i })).not.toBeChecked();
 });
+
+test("the history sidebar's pending entry is visible while a composition is running", async () => {
+  render(<ComposePane composeJob={fakeComposeJob({ status: "running" })} />);
+  await screen.findByText("Past Composition");
+
+  expect(screen.getByTestId("history-pending-entry")).toBeInTheDocument();
+});
+
+test("the pending entry stays visible after status becomes done until resultsHistory.summaries carries the matching id", async () => {
+  const { rerender } = render(<ComposePane composeJob={fakeComposeJob({ status: "running" })} />);
+  await screen.findByText("Past Composition");
+  expect(screen.getByTestId("history-pending-entry")).toBeInTheDocument();
+
+  rerender(<ComposePane composeJob={fakeComposeJob({ status: "done", resultId: "new-result" })} />);
+  await vi.waitFor(() => expect(api.listResults).toHaveBeenCalledTimes(2));
+
+  // refetch resolved but the result list still doesn't contain "new-result" — bridges the gap
+  expect(screen.getByTestId("history-pending-entry")).toBeInTheDocument();
+});
+
+test("the pending entry disappears the moment resultsHistory.summaries contains the composeJob.resultId entry", async () => {
+  vi.mocked(api.listResults)
+    .mockResolvedValueOnce([{ id: "r1", name: "Past Composition", request: "req", created_at: null, preserved: false }])
+    .mockResolvedValueOnce([
+      { id: "r1", name: "Past Composition", request: "req", created_at: null, preserved: false },
+      { id: "new-result", name: "New Composition", request: "req", created_at: null, preserved: false },
+    ]);
+
+  const { rerender } = render(<ComposePane composeJob={fakeComposeJob({ status: "running" })} />);
+  await screen.findByText("Past Composition");
+  expect(screen.getByTestId("history-pending-entry")).toBeInTheDocument();
+
+  rerender(<ComposePane composeJob={fakeComposeJob({ status: "done", resultId: "new-result" })} />);
+
+  await screen.findByText("New Composition");
+  expect(screen.queryByTestId("history-pending-entry")).not.toBeInTheDocument();
+});
+
+test("the pending entry disappears immediately on cancelled or error status", async () => {
+  const { rerender } = render(<ComposePane composeJob={fakeComposeJob({ status: "running" })} />);
+  await screen.findByText("Past Composition");
+  expect(screen.getByTestId("history-pending-entry")).toBeInTheDocument();
+
+  rerender(<ComposePane composeJob={fakeComposeJob({ status: "cancelled" })} />);
+  expect(screen.queryByTestId("history-pending-entry")).not.toBeInTheDocument();
+
+  rerender(<ComposePane composeJob={fakeComposeJob({ status: "error" })} />);
+  expect(screen.queryByTestId("history-pending-entry")).not.toBeInTheDocument();
+});

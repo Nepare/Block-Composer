@@ -292,6 +292,47 @@ def test_delete_missing_result_raises(db_path):
         store.delete("nope")
 
 
+def test_all_orders_results_by_created_at_descending(db_path):
+    store = SqliteResultStorage(db_path)
+    store.save(
+        Result(content="## A\n\nA.\n", name="A", created_at=datetime(2024, 1, 1, tzinfo=timezone.utc)),
+        filename_stem="a",
+    )
+    store.save(
+        Result(content="## B\n\nB.\n", name="B", created_at=datetime(2024, 3, 1, tzinfo=timezone.utc)),
+        filename_stem="b",
+    )
+    store.save(
+        Result(content="## C\n\nC.\n", name="C", created_at=datetime(2024, 2, 1, tzinfo=timezone.utc)),
+        filename_stem="c",
+    )
+
+    assert [r.id for r in store.all()] == ["b", "c", "a"]
+
+
+def test_all_sorts_result_with_no_created_at_last(db_path):
+    store = SqliteResultStorage(db_path)
+    store.save(
+        Result(content="## A\n\nA.\n", name="A", created_at=datetime(2024, 1, 1, tzinfo=timezone.utc)),
+        filename_stem="a",
+    )
+    store.save(Result(content="## B\n\nB.\n", name="B"), filename_stem="b")
+    store._conn.execute("UPDATE results SET created_at = NULL WHERE id = ?", ("b",))
+
+    assert [r.id for r in store.all()] == ["a", "b"]
+
+
+def test_all_order_is_stable_across_repeated_calls_on_tied_result_created_at(db_path):
+    store = SqliteResultStorage(db_path)
+    same_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    store.save(Result(content="## A\n\nA.\n", name="A", created_at=same_time), filename_stem="a")
+    store.save(Result(content="## B\n\nB.\n", name="B", created_at=same_time), filename_stem="b")
+
+    first = [r.id for r in store.all()]
+    second = [r.id for r in store.all()]
+    assert first == second
+
+
 def test_pending_sign_in_start_then_verify_and_consume(db_path):
     store = SqlitePendingSignInStore(db_path)
     state, code_verifier = store.start()
@@ -523,6 +564,47 @@ def test_clear_on_empty_result_store_is_a_noop(db_path):
     store = SqliteResultStorage(db_path)
     result = store.clear()
     assert result == ClearResult(deleted=0, skipped_preserved=0)
+
+
+def test_all_orders_blocks_by_created_at_descending(db_path):
+    store = SqliteBlockStorage(db_path)
+    store.save(
+        Block(id="", body="## A\n\nA.\n", created_at=datetime(2024, 1, 1, tzinfo=timezone.utc)),
+        filename_stem="a",
+    )
+    store.save(
+        Block(id="", body="## B\n\nB.\n", created_at=datetime(2024, 3, 1, tzinfo=timezone.utc)),
+        filename_stem="b",
+    )
+    store.save(
+        Block(id="", body="## C\n\nC.\n", created_at=datetime(2024, 2, 1, tzinfo=timezone.utc)),
+        filename_stem="c",
+    )
+
+    assert [b.id for b in store.all()] == ["b", "c", "a"]
+
+
+def test_all_sorts_block_with_no_created_at_last(db_path):
+    store = SqliteBlockStorage(db_path)
+    store.save(
+        Block(id="", body="## A\n\nA.\n", created_at=datetime(2024, 1, 1, tzinfo=timezone.utc)),
+        filename_stem="a",
+    )
+    store.save(Block(id="", body="## B\n\nB.\n"), filename_stem="b")
+    store._conn.execute("UPDATE blocks SET created_at = NULL WHERE id = ?", ("b",))
+
+    assert [b.id for b in store.all()] == ["a", "b"]
+
+
+def test_all_order_is_stable_across_repeated_calls_on_tied_created_at(db_path):
+    store = SqliteBlockStorage(db_path)
+    same_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    store.save(Block(id="", body="## A\n\nA.\n", created_at=same_time), filename_stem="a")
+    store.save(Block(id="", body="## B\n\nB.\n", created_at=same_time), filename_stem="b")
+
+    first = [b.id for b in store.all()]
+    second = [b.id for b in store.all()]
+    assert first == second
 
 
 def test_sqlite_migration_adds_preserved_column_to_pre_existing_db(db_path):

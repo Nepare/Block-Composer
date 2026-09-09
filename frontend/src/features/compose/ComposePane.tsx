@@ -19,6 +19,12 @@ export function ComposePane({ composeJob }: ComposePaneProps) {
   const resultsHistory = useResultsHistory();
   const previousStatusRef = useRef(composeJob.status);
 
+  const isPendingVisible =
+    composeJob.status === "running" ||
+    (composeJob.status === "done" &&
+      composeJob.resultId != null &&
+      !resultsHistory.summaries.some((summary) => summary.id === composeJob.resultId));
+
   useEffect(() => {
     if (previousStatusRef.current !== "done" && composeJob.status === "done") {
       resultsHistory.refetch();
@@ -48,6 +54,7 @@ export function ComposePane({ composeJob }: ComposePaneProps) {
         displayMode={displayMode}
         onSelect={(resultId) => setDisplayMode({ type: "history", resultId })}
         isComposeRunning={composeJob.status === "running"}
+        isPending={isPendingVisible}
         onNewComposition={() => {
           setDisplayMode({ type: "fresh" });
           setSelectedBlockIds([]);

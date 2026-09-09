@@ -165,7 +165,9 @@ class SqliteBlockStorage:
         return ClearResult(deleted=deleted, skipped_preserved=skipped)
 
     def all(self) -> list[Block]:
-        rows = self._conn.execute("SELECT * FROM blocks ORDER BY id").fetchall()
+        # NULL created_at sorts last under DESC (SQLite's native NULL ordering); id is a
+        # deterministic tiebreak for rows sharing a timestamp.
+        rows = self._conn.execute("SELECT * FROM blocks ORDER BY created_at DESC, id").fetchall()
         return [self._row_to_block(r) for r in rows]
 
     def siblings(self, base_slug: str) -> list[Block]:
@@ -383,7 +385,9 @@ class SqliteResultStorage:
         return ClearResult(deleted=deleted, skipped_preserved=skipped)
 
     def all(self) -> list[Result]:
-        rows = self._conn.execute("SELECT * FROM results ORDER BY id").fetchall()
+        # NULL created_at sorts last under DESC (SQLite's native NULL ordering); id is a
+        # deterministic tiebreak for rows sharing a timestamp.
+        rows = self._conn.execute("SELECT * FROM results ORDER BY created_at DESC, id").fetchall()
         return [self._row_to_result(r) for r in rows]
 
     def siblings(self, base_slug: str) -> list[Result]:

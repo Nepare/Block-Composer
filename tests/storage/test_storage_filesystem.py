@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from pathlib import Path
 
 import frontmatter
@@ -52,6 +53,48 @@ def test_hand_authored_block_gets_sane_defaults(tmp_path):
     assert block.created_by == "manual"
     assert block.source == "manual"
     assert "Just a body" in block.body
+
+
+def test_all_orders_blocks_by_created_at_descending(tmp_path):
+    store = FilesystemBlockStorage(tmp_path)
+    store.save(
+        Block(id="", body="## A\n\nA.\n", created_at=datetime(2024, 1, 1, tzinfo=timezone.utc)),
+        filename_stem="a",
+    )
+    store.save(
+        Block(id="", body="## B\n\nB.\n", created_at=datetime(2024, 3, 1, tzinfo=timezone.utc)),
+        filename_stem="b",
+    )
+    store.save(
+        Block(id="", body="## C\n\nC.\n", created_at=datetime(2024, 2, 1, tzinfo=timezone.utc)),
+        filename_stem="c",
+    )
+
+    assert [b.id for b in store.all()] == ["b", "c", "a"]
+
+
+def test_all_sorts_block_with_no_created_at_frontmatter_last(tmp_path):
+    store = FilesystemBlockStorage(tmp_path)
+    store.save(
+        Block(id="", body="## A\n\nA.\n", created_at=datetime(2024, 1, 1, tzinfo=timezone.utc)),
+        filename_stem="a",
+    )
+    (tmp_path / "b.md").write_text("## B\n\nNo frontmatter timestamp.\n", encoding="utf-8")
+
+    result = store.all()
+    assert [b.id for b in result] == ["a", "b"]
+    assert result[-1].created_at is None
+
+
+def test_all_order_is_stable_across_repeated_calls_on_tied_created_at(tmp_path):
+    store = FilesystemBlockStorage(tmp_path)
+    same_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    store.save(Block(id="", body="## A\n\nA.\n", created_at=same_time), filename_stem="a")
+    store.save(Block(id="", body="## B\n\nB.\n", created_at=same_time), filename_stem="b")
+
+    first = [b.id for b in store.all()]
+    second = [b.id for b in store.all()]
+    assert first == second
 
 
 def test_load_missing_block_raises(tmp_path):
@@ -250,6 +293,48 @@ def test_hand_authored_result_gets_sane_defaults(tmp_path):
     assert "Just a body" in result.content
     assert result.request == ""
     assert result.slots == []
+
+
+def test_all_orders_results_by_created_at_descending(tmp_path):
+    store = FilesystemResultStorage(tmp_path)
+    store.save(
+        Result(content="## A\n\nA.\n", name="A", created_at=datetime(2024, 1, 1, tzinfo=timezone.utc)),
+        filename_stem="a",
+    )
+    store.save(
+        Result(content="## B\n\nB.\n", name="B", created_at=datetime(2024, 3, 1, tzinfo=timezone.utc)),
+        filename_stem="b",
+    )
+    store.save(
+        Result(content="## C\n\nC.\n", name="C", created_at=datetime(2024, 2, 1, tzinfo=timezone.utc)),
+        filename_stem="c",
+    )
+
+    assert [r.id for r in store.all()] == ["b", "c", "a"]
+
+
+def test_all_sorts_result_with_no_created_at_frontmatter_last(tmp_path):
+    store = FilesystemResultStorage(tmp_path)
+    store.save(
+        Result(content="## A\n\nA.\n", name="A", created_at=datetime(2024, 1, 1, tzinfo=timezone.utc)),
+        filename_stem="a",
+    )
+    (tmp_path / "b.md").write_text("No frontmatter timestamp.\n", encoding="utf-8")
+
+    result = store.all()
+    assert [r.id for r in result] == ["a", "b"]
+    assert result[-1].created_at is None
+
+
+def test_all_order_is_stable_across_repeated_calls_on_tied_result_created_at(tmp_path):
+    store = FilesystemResultStorage(tmp_path)
+    same_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    store.save(Result(content="## A\n\nA.\n", name="A", created_at=same_time), filename_stem="a")
+    store.save(Result(content="## B\n\nB.\n", name="B", created_at=same_time), filename_stem="b")
+
+    first = [r.id for r in store.all()]
+    second = [r.id for r in store.all()]
+    assert first == second
 
 
 def test_result_save_with_dedup_reuses_an_identical_rerun(tmp_path):

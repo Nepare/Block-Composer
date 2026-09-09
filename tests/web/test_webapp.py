@@ -604,6 +604,7 @@ def test_compose_stream_delivers_events_in_expected_order(settings, monkeypatch,
     assert plan_payload["data"]["steps"] == [
         {"order": 1, "action": "use", "block_id": "block_0", "criteria": None},
         {"order": 2, "action": "use", "block_id": "block_1", "criteria": None},
+        {"order": 3, "action": "finalize", "block_id": None, "criteria": None},
     ]
 
     assert parsed[-1][0] == "complete"

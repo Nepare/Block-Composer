@@ -122,6 +122,35 @@ test("slot-scoped frames update the matching plan step's liveStatus by step === 
   expect(result.current.planSteps[1].liveStatus).toBe("done");
 });
 
+test("a trailing finalize plan step starts pending and is driven by finalize_start/finalize_done", () => {
+  const { result } = renderHook(() => useComposeJob());
+  act(() => result.current.start("job-1"));
+  const source = FakeEventSource.instances[0];
+
+  act(() =>
+    source.emitMessage({
+      kind: "plan",
+      data: {
+        steps: [
+          { order: 1, action: "use", block_id: "b1", criteria: null },
+          { order: 2, action: "finalize", block_id: null, criteria: null },
+        ],
+      },
+    })
+  );
+
+  expect(result.current.planSteps).toEqual([
+    { order: 1, action: "use", blockId: "b1", criteria: null, liveStatus: "pending" },
+    { order: 2, action: "finalize", blockId: null, criteria: null, liveStatus: "pending" },
+  ]);
+
+  act(() => source.emitMessage({ kind: "finalize_start", step: 2, total: 2 }));
+  expect(result.current.planSteps[1].liveStatus).toBe("running");
+
+  act(() => source.emitMessage({ kind: "finalize_done", step: 2, total: 2 }));
+  expect(result.current.planSteps[1].liveStatus).toBe("done");
+});
+
 test("any frame carrying step/total updates progress", () => {
   const { result } = renderHook(() => useComposeJob());
   act(() => result.current.start("job-1"));

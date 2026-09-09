@@ -780,6 +780,7 @@ def test_plan_event_carries_structured_step_list_before_execution(settings, fake
     assert steps == [
         {"order": 1, "action": "mutate", "block_id": "police_station", "criteria": "adapt"},
         {"order": 2, "action": "generate", "block_id": None, "criteria": "a sawmill"},
+        {"order": 3, "action": "finalize", "block_id": None, "criteria": None},
     ]
     for step in steps:
         assert set(step.keys()) == {"order", "action", "block_id", "criteria"}
@@ -794,6 +795,31 @@ def test_plan_event_carries_structured_step_list_before_execution(settings, fake
     plan_index = next(i for i, e in enumerate(events) if e.kind == "plan")
     first_step_index = next(i for i, e in enumerate(events) if e.kind in ("mutate_start", "generate_start"))
     assert plan_done_index < plan_index < first_step_index
+
+
+def test_finalize_step_and_events_bracket_the_naming_and_save_work(settings, fake_router):
+    _seed_library(settings)
+    plan = json.dumps({"steps": [{"order": 1, "action": "use", "block_id": "school", "criteria": None}]})
+    client = FakeLLMClient(replies=["NONE", plan, "school_result"])
+    fake_router(compose_module, client)
+
+    events: list[ProgressEvent] = []
+    compose_module.run_compose("need a school", settings=settings, on_progress=events.append)
+
+    plan_event = next(e for e in events if e.kind == "plan")
+    steps = plan_event.data["steps"]
+    assert steps[-1] == {"order": 2, "action": "finalize", "block_id": None, "criteria": None}
+
+    finalize_start_index = next(i for i, e in enumerate(events) if e.kind == "finalize_start")
+    naming_index = next(i for i, e in enumerate(events) if e.kind == "naming")
+    finalize_done_index = next(i for i, e in enumerate(events) if e.kind == "finalize_done")
+    assert finalize_start_index == naming_index - 1  # finalize_start fires right before naming begins
+    assert finalize_done_index == len(events) - 1  # finalize_done fires right after _save_result returns
+
+    for kind in ("finalize_start", "finalize_done"):
+        event = next(e for e in events if e.kind == kind)
+        assert event.step == 2
+        assert event.total == 2
 
 
 def test_explicit_name_bypasses_result_naming_and_preserves_raw_text(settings, fake_router):

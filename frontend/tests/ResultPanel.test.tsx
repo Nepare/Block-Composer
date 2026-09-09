@@ -35,6 +35,19 @@ test("shows a progress bar plus the plan while running", () => {
   expect(screen.getAllByTestId("plan-step")).toHaveLength(1);
 });
 
+test("the latest progress message renders even when planSteps is non-empty", () => {
+  const composeJob = fakeJob({
+    status: "running",
+    progress: { step: 1, total: 2 },
+    messages: ["Planning against 5 block(s)…"],
+    planSteps: [{ order: 1, action: "generate", blockId: null, criteria: null, liveStatus: "running" }],
+  });
+
+  render(<ResultPanel composeJob={composeJob} displayMode={{ type: "fresh" }} />);
+
+  expect(screen.getByText("Planning against 5 block(s)…")).toBeInTheDocument();
+});
+
 test("shows the finished content once done", () => {
   const composeJob = fakeJob({ status: "done", name: "My Composition", content: "finished content" });
 

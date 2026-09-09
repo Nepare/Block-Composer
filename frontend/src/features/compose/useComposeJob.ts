@@ -6,7 +6,7 @@ export type ComposeJobStatus = "idle" | "running" | "done" | "cancelled" | "erro
 
 export interface PlanStep {
   order: number;
-  action: "use" | "mutate" | "generate";
+  action: "use" | "mutate" | "generate" | "finalize";
   blockId: string | null;
   criteria: string | null;
   liveStatus: "pending" | "running" | "done";
@@ -33,7 +33,7 @@ export interface UseComposeJobResult extends ComposeJobState {
 
 interface PlanFrameStep {
   order: number;
-  action: "use" | "mutate" | "generate";
+  action: "use" | "mutate" | "generate" | "finalize";
   block_id: string | null;
   criteria: string | null;
 }
@@ -67,6 +67,8 @@ const SLOT_STATUS_BY_KIND: Record<string, PlanStep["liveStatus"]> = {
   mutate_done: "done",
   generate_start: "running",
   generate_done: "done",
+  finalize_start: "running",
+  finalize_done: "done",
 };
 
 const MESSAGE_KINDS = new Set([
