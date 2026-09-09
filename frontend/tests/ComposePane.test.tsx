@@ -168,3 +168,23 @@ test("'New Composition' returns from a history view to a fresh, editable Specifi
   expect(screen.getByLabelText("Description")).not.toBeDisabled();
   expect(screen.getByLabelText("Description")).toHaveValue("");
 });
+
+test("'New Composition' clicked from an already-fresh state clears name, description, specifiers, and checkboxes", async () => {
+  const user = userEvent.setup();
+
+  render(<ComposePane composeJob={fakeComposeJob({ status: "idle" })} />);
+
+  await user.type(screen.getByLabelText("Name"), "My draft");
+  await user.type(screen.getByLabelText("Description"), "Build a great resume");
+  await user.type(screen.getByLabelText("Specifiers"), "keep it short");
+  await user.click(screen.getByRole("checkbox", { name: /restrict generation/i }));
+  await user.click(screen.getByRole("checkbox", { name: /restrict mutation/i }));
+
+  await user.click(screen.getByRole("button", { name: /new composition/i }));
+
+  expect(screen.getByLabelText("Name")).toHaveValue("");
+  expect(screen.getByLabelText("Description")).toHaveValue("");
+  expect(screen.getByLabelText("Specifiers")).toHaveValue("");
+  expect(screen.getByRole("checkbox", { name: /restrict generation/i })).not.toBeChecked();
+  expect(screen.getByRole("checkbox", { name: /restrict mutation/i })).not.toBeChecked();
+});

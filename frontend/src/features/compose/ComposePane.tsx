@@ -15,6 +15,7 @@ export function ComposePane({ composeJob }: ComposePaneProps) {
   const [displayMode, setDisplayMode] = useState<DisplayMode>({ type: "fresh" });
   const [historyDetail, setHistoryDetail] = useState<ResultDetail | null>(null);
   const [selectedBlockIds, setSelectedBlockIds] = useState<string[]>([]);
+  const [freshKey, setFreshKey] = useState(0);
   const resultsHistory = useResultsHistory();
   const previousStatusRef = useRef(composeJob.status);
 
@@ -47,7 +48,11 @@ export function ComposePane({ composeJob }: ComposePaneProps) {
         displayMode={displayMode}
         onSelect={(resultId) => setDisplayMode({ type: "history", resultId })}
         isComposeRunning={composeJob.status === "running"}
-        onNewComposition={() => setDisplayMode({ type: "fresh" })}
+        onNewComposition={() => {
+          setDisplayMode({ type: "fresh" });
+          setSelectedBlockIds([]);
+          setFreshKey((key) => key + 1);
+        }}
         onBackToLive={() => setDisplayMode({ type: "fresh" })}
         onRename={resultsHistory.renameResult}
         onPreserve={resultsHistory.preserveResult}
@@ -58,6 +63,7 @@ export function ComposePane({ composeJob }: ComposePaneProps) {
       <div className="flex min-h-0 min-w-0 flex-1">
         <div className="w-96 shrink-0 overflow-y-auto border-r">
           <SpecificationsPanel
+            key={freshKey}
             composeJob={composeJob}
             displayMode={displayMode}
             historyDetail={historyDetail}
