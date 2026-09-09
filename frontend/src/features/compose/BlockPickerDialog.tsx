@@ -53,27 +53,29 @@ export function BlockPickerDialog({ open, onOpenChange, initialSelectedIds, onDo
       onOpenChange={onOpenChange}
       title="Select exact blocks"
       description="Choose the exact blocks this composition may draw from."
-      contentClassName="sm:max-w-4xl"
+      contentClassName="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-4xl"
     >
-      <div className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto">
-        <BlockGridLayout
-          search={search}
-          onSearchChange={setSearch}
-          viewMode={viewMode}
-          onViewModeChange={setViewMode}
-          loading={loading}
-          loadingMessage="Loading library..."
-          items={visibleBlocks}
-          getItemKey={(block) => block.id}
-          renderItem={(block, mode) => (
-            <PickerTile block={block} viewMode={mode} checked={selected.has(block.id)} onToggle={() => toggle(block.id)} />
-          )}
-          emptyMessage={
-            <p className="text-muted-foreground">
-              {blocks.length === 0 ? "The library is empty." : "No blocks match your search."}
-            </p>
-          }
-        />
+      <div className="flex min-h-0 flex-1 flex-col gap-4">
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <BlockGridLayout
+            search={search}
+            onSearchChange={setSearch}
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+            loading={loading}
+            loadingMessage="Loading library..."
+            items={visibleBlocks}
+            getItemKey={(block) => block.id}
+            renderItem={(block, mode) => (
+              <PickerTile block={block} viewMode={mode} checked={selected.has(block.id)} onToggle={() => toggle(block.id)} />
+            )}
+            emptyMessage={
+              <p className="text-muted-foreground">
+                {blocks.length === 0 ? "The library is empty." : "No blocks match your search."}
+              </p>
+            }
+          />
+        </div>
         <div className="flex items-center justify-between gap-3 border-t pt-4">
           <p className="text-sm text-muted-foreground">{selected.size} selected</p>
           <div className="flex gap-2">

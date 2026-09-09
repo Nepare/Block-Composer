@@ -139,7 +139,7 @@ function App() {
             </TabsTrigger>
           </TabsList>
         </header>
-        <TabsContent value="compose" className="min-h-0 flex-1 overflow-y-auto">
+        <TabsContent value="compose" className="min-h-0 flex-1 overflow-hidden">
           <ComposePane composeJob={composeJob} />
         </TabsContent>
         <TabsContent value="library" className="min-h-0 flex-1 overflow-y-auto bg-muted">

@@ -159,7 +159,9 @@ test("'New Composition' returns from a history view to a fresh, editable Specifi
 
   await user.click(screen.getByRole("button", { name: /new composition/i }));
 
-  expect(screen.queryByRole("button", { name: /new composition/i })).not.toBeInTheDocument();
+  // The button lives in the always-visible history sidebar now, so it stays in the
+  // document after use — only the Specifications panel's state should have changed.
+  expect(screen.getByRole("button", { name: /new composition/i })).toBeInTheDocument();
   const button = screen.getByRole("button", { name: /^compose$/i });
   expect(button).toBeInTheDocument();
   expect(button).toBeDisabled();

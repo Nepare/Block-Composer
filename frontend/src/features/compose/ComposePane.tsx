@@ -40,13 +40,14 @@ export function ComposePane({ composeJob }: ComposePaneProps) {
   }, [displayMode, resultsHistory]);
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full min-h-0">
       <HistorySidebar
         summaries={resultsHistory.summaries}
         loading={resultsHistory.loading}
         displayMode={displayMode}
         onSelect={(resultId) => setDisplayMode({ type: "history", resultId })}
         isComposeRunning={composeJob.status === "running"}
+        onNewComposition={() => setDisplayMode({ type: "fresh" })}
         onBackToLive={() => setDisplayMode({ type: "fresh" })}
         onRename={resultsHistory.renameResult}
         onPreserve={resultsHistory.preserveResult}
@@ -54,18 +55,17 @@ export function ComposePane({ composeJob }: ComposePaneProps) {
         onDelete={resultsHistory.deleteResult}
         onClearHistory={resultsHistory.clearHistory}
       />
-      <div className="flex min-w-0 flex-1">
+      <div className="flex min-h-0 min-w-0 flex-1">
         <div className="w-96 shrink-0 overflow-y-auto border-r">
           <SpecificationsPanel
             composeJob={composeJob}
             displayMode={displayMode}
             historyDetail={historyDetail}
-            onNewComposition={() => setDisplayMode({ type: "fresh" })}
             selectedBlockIds={selectedBlockIds}
             onSelectionChange={setSelectedBlockIds}
           />
         </div>
-        <div className="min-w-0 flex-1 overflow-y-auto">
+        <div className="min-w-0 flex-1 overflow-y-auto bg-muted/40">
           <ResultPanel composeJob={composeJob} displayMode={displayMode} historyDetail={historyDetail} />
         </div>
       </div>

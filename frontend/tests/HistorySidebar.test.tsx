@@ -30,6 +30,7 @@ function Harness({
   isComposeRunning = false,
   displayMode = { type: "fresh" },
   onSelect = vi.fn(),
+  onNewComposition = vi.fn(),
   onBackToLive = vi.fn(),
   renameImpl,
   preserveImpl,
@@ -41,6 +42,7 @@ function Harness({
   isComposeRunning?: boolean;
   displayMode?: DisplayMode;
   onSelect?: (id: string) => void;
+  onNewComposition?: () => void;
   onBackToLive?: () => void;
   renameImpl?: (id: string, name: string) => Promise<boolean>;
   preserveImpl?: (id: string) => Promise<boolean>;
@@ -83,6 +85,7 @@ function Harness({
       displayMode={displayMode}
       onSelect={onSelect}
       isComposeRunning={isComposeRunning}
+      onNewComposition={onNewComposition}
       onBackToLive={onBackToLive}
       onRename={onRename}
       onPreserve={onPreserve}

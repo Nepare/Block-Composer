@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { ArrowLeft, ChevronLeft, ChevronRight, Shield, Trash2 } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, Plus, Shield, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { ClearResultsResult, ResultSummary } from "@/features/compose/api";
 import type { DisplayMode } from "@/features/compose/types";
@@ -15,6 +15,7 @@ interface HistorySidebarProps {
   displayMode: DisplayMode;
   onSelect: (resultId: string) => void;
   isComposeRunning: boolean;
+  onNewComposition: () => void;
   onBackToLive: () => void;
   onRename: (id: string, name: string) => Promise<boolean>;
   onPreserve: (id: string) => Promise<boolean>;
@@ -29,6 +30,7 @@ export function HistorySidebar({
   displayMode,
   onSelect,
   isComposeRunning,
+  onNewComposition,
   onBackToLive,
   onRename,
   onPreserve,
@@ -91,22 +93,37 @@ export function HistorySidebar({
   return (
     <div
       className={cn(
-        "flex shrink-0 flex-col border-r bg-muted/40 transition-[width] duration-200 ease-in-out",
+        "flex min-h-0 shrink-0 flex-col border-r bg-muted/40 transition-[width] duration-200 ease-in-out",
         collapsed ? "w-11" : "w-64"
       )}
     >
-      <div className="flex items-center justify-between gap-2 border-b p-2">
-        {!collapsed && <h2 className="px-1 text-sm font-semibold">History</h2>}
+      <div className="shrink-0 p-2">
         <Button
           type="button"
-          variant="ghost"
-          size="icon-sm"
-          aria-label={collapsed ? "Expand history" : "Collapse history"}
-          onClick={() => setCollapsed((prev) => !prev)}
+          variant="secondary"
+          onClick={onNewComposition}
+          aria-label="New composition"
+          title="New composition"
+          className={cn("w-full gap-2 rounded-2xl", collapsed ? "justify-center px-0" : "justify-start")}
         >
-          {collapsed ? <ChevronRight /> : <ChevronLeft />}
+          <Plus className="size-4" />
+          {!collapsed && "New Composition"}
         </Button>
       </div>
+      <button
+        type="button"
+        onClick={() => setCollapsed((prev) => !prev)}
+        aria-label={collapsed ? "Expand history" : "Collapse history"}
+        className={cn(
+          "flex shrink-0 items-center gap-2.5 border-y bg-muted/30 px-3 py-2.5 text-left transition-colors hover:bg-muted/60",
+          collapsed && "justify-center px-0"
+        )}
+      >
+        <span className="flex size-6 shrink-0 items-center justify-center rounded-lg border bg-card text-muted-foreground shadow-sm">
+          {collapsed ? <ChevronRight className="size-3.5" /> : <ChevronLeft className="size-3.5" />}
+        </span>
+        {!collapsed && <span className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">History</span>}
+      </button>
       {!collapsed && (
         <>
           {showBackToLive && (

@@ -20,7 +20,6 @@ interface SpecificationsPanelProps {
   composeJob: UseComposeJobResult;
   displayMode?: DisplayMode;
   historyDetail?: ResultDetail | null;
-  onNewComposition?: () => void;
   selectedBlockIds?: string[];
   onSelectionChange?: (ids: string[]) => void;
 }
@@ -29,7 +28,6 @@ export function SpecificationsPanel({
   composeJob,
   displayMode = { type: "fresh" },
   historyDetail = null,
-  onNewComposition = () => {},
   selectedBlockIds = [],
   onSelectionChange = () => {},
 }: SpecificationsPanelProps) {
@@ -103,9 +101,6 @@ export function SpecificationsPanel({
           <Label>Project count{historyDetail && `: ${historyDetail.slots.length}`}</Label>
           <Slider value={[historyDetail?.slots.length ?? 0]} min={MIN_COUNT} max={MAX_COUNT} step={1} disabled />
         </div>
-        <Button type="button" variant="outline" onClick={onNewComposition}>
-          New Composition
-        </Button>
       </div>
     );
   }
@@ -157,13 +152,17 @@ export function SpecificationsPanel({
         </Label>
       </div>
       <div className="flex flex-col gap-2">
-        <Label>Select exact blocks</Label>
         <div className="flex items-center gap-2">
           <Button type="button" variant="outline" className="flex-1 justify-start" onClick={() => setPickerOpen(true)}>
             {hasSelection ? `Selected ${selectedBlockIds.length} block${selectedBlockIds.length === 1 ? "" : "s"}` : "Select exact blocks"}
           </Button>
           {hasSelection && (
-            <Button type="button" variant="ghost" size="sm" onClick={() => onSelectionChange([])}>
+            <Button
+              type="button"
+              variant="outline"
+              className="border-2 border-destructive text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => onSelectionChange([])}
+            >
               Clear selection
             </Button>
           )}
