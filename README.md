@@ -7,57 +7,59 @@ from a natural-language request by reusing, adapting, or generating blocks as ne
 
 ## Requirements
 
+`cvdocs` needs:
+
 - A Google account that can view the source Doc(s) you want to dissect
 - A free [OpenRouter](https://openrouter.ai) account (for `generate`/`mutate`/`compose`)
 
-Whether you need to use the app via a Web GUI or local CLI, you'll need:
+Each deployment type below has its own additional requirements.
 
-- **Local CLI** — Python 3.11+. Optionally, [Ollama](https://ollama.com) installed locally
-  (used by default for the cheap `naming` nad `keywords` tasks — see [Configuration](#configuration)).
-- **Hosted deployment** — [Docker](https://www.docker.com) (with Compose).
+## Contents
 
-## Install
+- [Hosted deployment](#hosted-deployment-docker) — Web GUI + HTTP API, run via Docker
+- [Local CLI deployment](#local-cli-deployment) — the `cvdocs` command, run on your own machine
+- [Configuration](#configuration) — the configuration to fine tune the system
 
-### Local CLI
+Pick whichever matches how you want to use `cvdocs` — the two are independent, so you only
+need to read the section that applies to you.
 
-```
-python -m venv .venv
-.venv\Scripts\Activate.ps1        # PowerShell; use .venv/bin/activate on macOS/Linux
-pip install -e ".[dev]"
-```
+## Hosted Deployment (Docker)
 
-This installs the `cvdocs` command into your virtual environment (see `pyproject.toml` for
-the exact dependency list — there's no separate `requirements.txt`).
+Run `Block Composer` as a Docker container to serve the Web GUI and HTTP API to others, or from a
+server with no local browser to pop an OAuth window on.
 
-### Hosted deployment (Docker)
+### Requirements
 
-No install step — `docker compose build` (covered in [Usage](#usage) below) builds the image
-from the `Dockerfile`, pulling everything it needs (Python, Ollama, dependencies) inside the
-container.
+In addition to the [common requirements](#requirements) above:
 
-## Setup
+- [Docker](https://www.docker.com) (with Compose)
 
-OpenRouter and/or Ollama are needed regardless of how you run this. Then pick the Google OAuth
-setup matching your deployment mode: local CLI use and the hosted Docker deployment each need
-their own, independent Google OAuth client — set up whichever one applies to you, not both.
+### Setup
 
-### 1. OpenRouter (for `generate`/`mutate`/`compose`)
+#### Prerequisits
+
+1. Copy `.env.example` to `.env` (gitignored), the variables will be assigned during the setup step.
+2. Assign the variables in `.env` using instructions from the next steps.
+3. `docker compose build` (see [Usage](#usage) below) builds the image from the `Dockerfile`, pulling 
+   everything it needs (Python, Ollama, dependencies) inside the container.
+
+#### 1. OpenRouter (for `generate`/`mutate`/`compose`)
 
 1. Sign up at [openrouter.ai](https://openrouter.ai) (Google/GitHub/email, no card needed).
 2. Go to [openrouter.ai/keys](https://openrouter.ai/keys) → **Create Key** → copy it
    (starts with `sk-or-v1-...`).
-3. Copy `.env.example` to `.env` (gitignored) and set:
+3. In `.env`, set:
    ```
    OPENROUTER_API_KEY=sk-or-v1-...
    ```
 
-That's it — the models this project defaults to the configured model; the key just identifies you 
-for OpenRouter. Remember: free-tier `:free` models sit behind a shared upstream pool and can 
-occasionally return a transient 429 (rate-limited) or, less often, get deprecated outright — 
-if `config.yaml`'s configured model ever fails outright, check [openrouter.ai/models](https://openrouter.ai/models) 
+That's it — this project defaults to the configured model; the key just identifies you for 
+OpenRouter. Remember: free-tier `:free` models sit behind a shared upstream pool and can
+occasionally return a transient 429 (rate-limited) or, less often, get deprecated outright —
+if `config.yaml`'s configured model ever fails outright, check [openrouter.ai/models](https://openrouter.ai/models)
 (filter by price) for a current `:free` slug to swap in.
 
-### 2. Ollama (optional, for the cheaper local tasks)
+#### 2. Ollama (optional, for the cheaper local tasks)
 
 `config.yaml` routes the cheap block/variant-naming task to a local model by default. If
 you don't want to install Ollama, just point it back at OpenRouter instead:
@@ -68,15 +70,167 @@ llm:
     naming: openrouter:nvidia/nemotron-3-super-120b-a12b:free
 ```
 
-Setting up local models depends on how you use the app. 
+No installation is needed for the hosted deployment. `docker-compose.yml` runs its own
+`ollama` sidecar and an `ollama-pull` step that pulls that model automatically on first
+start; the weights are kept in a named volume, so a restart doesn't re-download them.
+Change `llm.models.naming` and the next `docker compose up` pulls whatever you set. If it's
+not an `ollama:` model at all (e.g. pointed back at OpenRouter per the example above),
+`ollama-pull` skips the pull entirely.
 
-- **2.1 Local CLI** — you're running `cvdocs` directly on your own machine. You need to 
-  install Ollama on your machine locally.
-- **2.2 Hosted deployment** — you're running `cvdocs` as a Docker container, e.g. to serve
-  the HTTP API to others or from a server with no local browser to pop a window on. Everything
-  is installed automatically.
+#### 3. Google OAuth (for importing from Google Docs)
 
-#### 2.1 Local CLI
+`cvdocs` needs a Google OAuth connection to read Docs if you want to import Google Docs blocks. 
+The hosted deployment uses a browser-based OAuth flow served over HTTP (since there's no 
+local machine for a browser popup to talk to), backed by a **Web application** OAuth client and 
+a shared authorization credential that gates who can trigger it.
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com) and create a new
+   project (any name).
+2. **APIs & Services → Library** → search "Google Docs API" → **Enable**. (The Drive API
+   is not needed — `cvdocs` never writes to Drive, only reads a Doc's content.)
+3. **APIs & Services → OAuth consent screen** → User type **External** → fill the required
+   fields → leave publishing status as **Testing** → under "Test users" add the Google
+   account that can view the Doc(s) you'll dissect.
+4. **APIs & Services → Credentials** → **Create Credentials → OAuth client ID** →
+   Application type **Web application**. Under **Authorized redirect URIs**, add
+   `http://localhost:8000/auth/google/callback` (or whatever `auth.google.web_redirect_uri`
+   is set to in `config.yaml`, if you change the port/host). 
+5. **Create**, then copy the **Client ID** to `GOOGLE_WEB_CLIENT_ID`, and **Client secret**
+   to `GOOGLE_WEB_CLIENT_SECRET` in `.env`.
+
+#### 4. Running the whole thing
+
+1. Pick a long, random value for the shared authorization credential that gates the
+   sign-in link (e.g. `openssl rand -hex 32`, [Devglan hash generator](https://www.devglan.com/online-tools/openssl-hash-generator) 
+   or just think of a random string) — this is what stops a stranger who finds the URL 
+   from starting a connection attempt against your deployment.
+2. Copy this value into `CVDOCS_API_KEY` in `.env`.
+3. `docker compose up --build`, then visit
+   `http://localhost:8000/auth/google/login?key=<your CVDOCS_API_KEY>` in a browser to
+   connect. `docker compose exec app cvdocs auth status` confirms it from inside the
+   container.
+
+This is a single shared connection for the whole deployment (not one per visiting user).
+Since the app stays in **Testing** mode (fine for personal use — no Google verification
+review needed), the connection expires after about 7 days; just repeat step 7 when that
+happens.
+
+### Usage
+
+#### Web GUI
+
+On first visit, paste the shared `CVDOCS_API_KEY` secret into the login screen; it's validated
+against `GET /auth/check` and persisted in the browser so subsequent visits skip the prompt.
+The Library tab browses/generates/mutates/dissects blocks; the Compose tab drives a composition
+from a description to a finished result, with a history sidebar to revisit past ones.
+
+These commands handle the entire process:
+```
+docker compose build                    # builds the image
+docker compose up                       # runs the container
+```
+
+#### HTTP
+
+Every route below is gated by the same `?key=<CVDOCS_API_KEY>` credential as
+`/auth/google/login`.
+
+```
+POST /generate/start                    # start a generate job -> {"job_id"}
+POST /mutate/start                      # start a mutate job -> {"job_id"}
+POST /dissect/start                     # start a dissect job -> {"job_id"}
+POST /compose/start                     # start a compose job -> {"job_id"}
+GET  /stream/{job_id}                   # SSE progress + final outcome for any job
+POST /cancel/{job_id}                   # cancel a running compose job
+
+GET  /blocks                            # list blocks, optional query/tag filters
+GET  /blocks/{id}                       # one block's full content
+PUT  /blocks/{id}                       # replace a block's body/tags/schema
+DELETE /blocks/{id}                     # delete a block
+POST /blocks/{id}/preserve              # lock a block
+POST /blocks/{id}/unpreserve            # unlock a block
+POST /blocks/clear                      # delete every non-preserved block
+
+GET  /results                           # list saved compose results, optional query filter
+GET  /results/{id}                      # one result's full content + slots
+DELETE /results/{id}                    # delete a saved result
+POST /results/{id}/preserve             # lock a result
+POST /results/{id}/unpreserve           # unlock a result
+POST /results/{id}/rename               # rename a result
+POST /results/clear                     # delete every non-preserved result
+```
+
+`generate`/`mutate`/`dissect` take the same inputs as their CLI commands (see
+[Local CLI Deployment](#local-cli-deployment) for the full flag list); `compose` takes the
+same inputs as its CLI command plus a `specifiers` field (short free text merged into `request`)
+and has no filesystem output path or dry-run mode. Unlike the other three, compose is
+cancellable and its stream outcome includes the finished document.
+
+```
+curl -X POST "http://localhost:8000/generate/start?key=<CVDOCS_API_KEY>" \
+     -H "Content-Type: application/json" \
+     -d '{"criteria": "a small lighthouse keeper role"}'
+# -> {"job_id": "<id>"}
+
+curl -N "http://localhost:8000/stream/<id>?key=<CVDOCS_API_KEY>"
+```
+
+## Local CLI Deployment
+
+Run `Block Composer` directly on your own machine via the `cvdocs` command.
+
+### Requirements
+
+In addition to the [common requirements](#requirements) above:
+
+- Python 3.11+
+- Optionally, [Ollama](https://ollama.com) installed locally (used by default for the cheap
+  `naming` and `keywords` tasks — see [Configuration](#configuration))
+
+### Setup
+
+#### Prerequisits
+
+1. Copy `.env.example` to `.env` (gitignored), the variables will be assigned during the setup step.
+2. Assign the variables in `.env` using instructions from the next steps.
+
+#### 1. Install
+
+```
+python -m venv .venv
+.venv\Scripts\Activate.ps1        # PowerShell; use .venv/bin/activate on macOS/Linux
+pip install -e ".[dev]"
+```
+
+This installs the `cvdocs` command into your virtual environment (see `pyproject.toml` for
+the exact dependency list — there's no separate `requirements.txt`).
+
+#### 2. OpenRouter (for `generate`/`mutate`/`compose`)
+
+1. Sign up at [openrouter.ai](https://openrouter.ai) (Google/GitHub/email, no card needed).
+2. Go to [openrouter.ai/keys](https://openrouter.ai/keys) → **Create Key** → copy it
+   (starts with `sk-or-v1-...`).
+3. In `.env`, set:
+   ```
+   OPENROUTER_API_KEY=sk-or-v1-...
+   ```
+
+That's it — this project defaults to the configured model; the key just identifies you for 
+OpenRouter. Remember: free-tier `:free` models sit behind a shared upstream pool and can
+occasionally return a transient 429 (rate-limited) or, less often, get deprecated outright —
+if `config.yaml`'s configured model ever fails outright, check [openrouter.ai/models](https://openrouter.ai/models)
+(filter by price) for a current `:free` slug to swap in.
+
+#### 3. Ollama (optional, for the cheaper local tasks)
+
+`config.yaml` routes the cheap block/variant-naming task to a local model by default. If
+you don't want to install Ollama, just point it back at OpenRouter instead:
+
+```yaml
+llm:
+  models:
+    naming: openrouter:nvidia/nemotron-3-super-120b-a12b:free
+```
 
 1. Install from [ollama.com](https://ollama.com) (or `winget install Ollama.Ollama` on
    Windows) and make sure `ollama serve` is running (the installer starts it automatically).
@@ -84,30 +238,11 @@ Setting up local models depends on how you use the app.
 
 No dedicated GPU is required — this is a small model that runs fine on CPU.
 
-#### 2.2 Hosted deployment (Docker)
+#### 4. Google OAuth (for `dissect`)
 
-No installation is needed.
-
-`docker-compose.yml` runs its own `ollama` sidecar and an `ollama-pull` step that pulls that 
-model automatically on first start; the weights are kept in a named volume, so a restart 
-doesn't re-download them. Change `llm.models.naming` and the next `docker compose up` pulls 
-whatever you set. If it's not an `ollama:` model at all (e.g. pointed back at OpenRouter per 
-the example above), `ollama-pull` skips the pull entirely.
-
-### 3. Google OAuth setup
-
-`cvdocs` needs one Google OAuth connection to read Docs for `dissect`, but which *kind* of
-connection depends on how you run it — set up whichever one matches:
-
-- **3.1 Local CLI** — you're running `cvdocs` directly on your own machine. Simplest path:
-  a one-time browser popup handles sign-in, and only you ever use this connection. Pick this
-  unless you specifically need the hosted deployment.
-- **3.2 Hosted deployment** — you're running `cvdocs` as a Docker container, e.g. to serve
-  the HTTP API to others or from a server with no local browser to pop a window on. Needs a
-  browser-based OAuth flow instead, plus a shared authorization credential gating who can
-  trigger it.
-
-#### 3.1 Local CLI (for `dissect`)
+`cvdocs` needs a Google OAuth connection to read Docs for `dissect`. The local CLI uses the
+simplest path: a one-time browser popup handles sign-in, and only you ever use this
+connection.
 
 1. Go to [console.cloud.google.com](https://console.cloud.google.com) and create a new
    project (any name).
@@ -116,7 +251,7 @@ connection depends on how you run it — set up whichever one matches:
 3. **APIs & Services → OAuth consent screen** → User type **External** → fill the required
    fields → leave publishing status as **Testing** → under "Test users" add the Google
    account that can view the Doc(s) you'll dissect (this must be the account you'll
-   actually sign in with in step 5).
+   actually sign in with in step 6).
 4. **APIs & Services → Credentials** → **Create Credentials → OAuth client ID** →
    Application type **Desktop app** → Create → **Download JSON**.
 5. Save that downloaded file as `credentials/credentials.json` in the project root (that
@@ -133,50 +268,9 @@ Since the app stays in **Testing** mode (fine for personal use — no Google ver
 review needed), tokens for test users expire after about 7 days; just run
 `cvdocs auth login` again when that happens.
 
-#### 3.2 Hosted deployment (Docker)
+### Usage
 
-Running `cvdocs` as a Docker container uses a *different* Google connection method than the local 
-CLI — a browser-based OAuth flow served over HTTP, since there's no local machine for a browser 
-popup to talk to. This needs its own Google OAuth client (a **Web application** client, not the 
-Desktop-app one from 3.1) plus a secret of its own:
-
-1. In the same Google Cloud project as 3.1, go to **APIs & Services → Credentials**
-   → **Create Credentials → OAuth client ID** → Application type **Web application**.
-   Under **Authorized redirect URIs**, add `http://localhost:8000/auth/google/callback`
-   (or whatever `auth.google.web_redirect_uri` is set to in `config.yaml`, if you change the
-   port/host). Create, then copy the **Client ID** and **Client secret**.
-2. Pick a long, random value for the shared authorization credential that gates the
-   sign-in link (e.g. `openssl rand -hex 32`) — this is what stops a stranger who finds the
-   URL from starting a connection attempt against your deployment.
-3. Copy `.env.example` to `.env` and fill in `GOOGLE_WEB_CLIENT_ID`,
-   `GOOGLE_WEB_CLIENT_SECRET`, and `CVDOCS_API_KEY` (the value from step 2), alongside
-   `OPENROUTER_API_KEY` from section 1.
-4. `docker compose up --build`, then visit
-   `http://localhost:8000/auth/google/login?key=<your CVDOCS_API_KEY>` in a browser to
-   connect. `docker compose exec app cvdocs auth status` confirms it from inside the
-   container.
-
-This is a single shared connection for the whole deployment (not one per visiting user).
-
-## Usage
-
-### Web UI
-
-On first visit, paste the shared `CVDOCS_API_KEY` secret into the login screen; it's validated 
-against `GET /auth/check` and persisted in the browser so subsequent visits skip the prompt. 
-The Library tab browses/generates/mutates/dissects blocks; the Compose tab drives a composition 
-from a description to a finished result, with a history sidebar to revisit past ones.
-
-The intended way to use Web GUI is via Docker. This command handles the entire process: 
-```
-docker compose build                                # builds the image
-docker compose up                                   # runs the container
-```
-
-### CLI
-
-Requires Setup 1 (OpenRouter) and Setup 3.1 (Google OAuth, local CLI); Setup 2 (Ollama) only
-matters if you're using the default local `naming` model.
+#### CLI
 
 ```
 cvdocs auth login                                   # once
@@ -226,70 +320,25 @@ default for that one call, e.g. `--model openrouter:z-ai/glm-5.3` or
 `--model ollama:qwen3:4b`.
 
 `--name` (`generate`/`mutate`/`compose`) skips that command's naming-model call and uses the
-given name instead; `--preserve` marks the produced block/result as protected at creation 
+given name instead; `--preserve` marks the produced block/result as protected at creation
 time — a protected entry is exempt from `blocks clear`/`results clear`.
 
 `compose`'s `--restrict-generate` forbids the planner from producing any brand-new block;
-`--restrict-mutate` forbids the planner from producing any edited variant of an existing block, 
+`--restrict-mutate` forbids the planner from producing any edited variant of an existing block,
 so every existing block in the result appears exactly as originally authored The two flags are
 independent and may be combined, in which case the result is built entirely from existing
 blocks used exactly as-is.
 
 `compose`'s repeatable `--from-blocks <id>` restricts the planner's candidate pool to
-exactly the designated blocks. Brand-new content is fully disabled for the call , while mutation 
+exactly the designated blocks. Brand-new content is fully disabled for the call , while mutation
 of a designated block stays available unless `--restrict-mutate` is also passed.
-
-### HTTP
-
-Requires the hosted deployment from [Setup 3.2](#32-hosted-deployment-docker)
-(Docker, Web OAuth client, `CVDOCS_API_KEY`). Every route below is gated by the same
-`?key=<CVDOCS_API_KEY>` credential as `/auth/google/login`.
-
-```
-POST /generate/start                    # start a generate job -> {"job_id"}
-POST /mutate/start                      # start a mutate job -> {"job_id"}
-POST /dissect/start                     # start a dissect job -> {"job_id"}
-POST /compose/start                     # start a compose job -> {"job_id"}
-GET  /stream/{job_id}                   # SSE progress + final outcome for any job
-POST /cancel/{job_id}                   # cancel a running compose job
-
-GET  /blocks                            # list blocks, optional query/tag filters
-GET  /blocks/{id}                       # one block's full content
-PUT  /blocks/{id}                       # replace a block's body/tags/schema
-DELETE /blocks/{id}                     # delete a block
-POST /blocks/{id}/preserve              # lock a block
-POST /blocks/{id}/unpreserve            # unlock a block
-POST /blocks/clear                      # delete every non-preserved block
-
-GET  /results                           # list saved compose results, optional query filter
-GET  /results/{id}                      # one result's full content + slots
-DELETE /results/{id}                    # delete a saved result
-POST /results/{id}/preserve             # lock a result
-POST /results/{id}/unpreserve           # unlock a result
-POST /results/{id}/rename               # rename a result
-POST /results/clear                     # delete every non-preserved result
-```
-
-`generate`/`mutate`/`dissect` take the same inputs as their CLI commands; `compose` takes the
-same inputs as its CLI command plus a `specifiers` field (short free text merged into `request`)
-and has no filesystem output path or dry-run mode. Unlike the other three, compose is
-cancellable and its stream outcome includes the finished document.
-
-```
-curl -X POST "http://localhost:8000/generate/start?key=<CVDOCS_API_KEY>" \
-     -H "Content-Type: application/json" \
-     -d '{"criteria": "a small lighthouse keeper role"}'
-# -> {"job_id": "<id>"}
-
-curl -N "http://localhost:8000/stream/<id>?key=<CVDOCS_API_KEY>"
-```
 
 ## Configuration
 
 `config.yaml` (committed — no secrets live in it) is grouped into four sections:
 
-- `llm.*` — which `provider:model-id` handles each task, plus provider connection settings. 
-  Mix and match freely — e.g. push the expensive planning work to a strong hosted model 
+- `llm.*` — which `provider:model-id` handles each task, plus provider connection settings.
+  Mix and match freely — e.g. push the expensive planning work to a strong hosted model
   while keeping cheap tasks fully local and free.
 - `path.*` — filesystem locations.
 - `behavior.compose.*` — compose's own tuning knobs.
@@ -301,15 +350,15 @@ since all variants live in the same file.
 
 Secrets never live in `config.yaml` — only the *names* of the env vars that hold them do.
 They live in a gitignored `.env` instead: `OPENROUTER_API_KEY` always; `GOOGLE_WEB_CLIENT_ID`,
-`GOOGLE_WEB_CLIENT_SECRET`, and `CVDOCS_API_KEY` only if you're running the hosted deployment
-(Setup 3.2). See `.env.example` for the full list.
+`GOOGLE_WEB_CLIENT_SECRET`, and `CVDOCS_API_KEY` only if you're running the hosted deployment.
+See `.env.example` for the full list.
 
 ## `input_prompts/constraints/`
 
 Five files — `GENERATE_CONSTRAINTS.md`, `NAMING_CONSTRAINTS.md`, `MUTATE_CONSTRAINTS.md`,
-`COMPOSE_CONSTRAINTS.md`, `KEYWORDS_CONSTRAINTS.md` — work like `CLAUDE.md`/`AGENTS.md`: 
-whatever you write in one is appended to that tool's system prompt on every call. Use them 
-for negative constraints ("don't do X") specific to your own use of the tool. A missing or 
+`COMPOSE_CONSTRAINTS.md`, `KEYWORDS_CONSTRAINTS.md` — work like `CLAUDE.md`/`AGENTS.md`:
+whatever you write in one is appended to that tool's system prompt on every call. Use them
+for negative constraints ("don't do X") specific to your own use of the tool. A missing or
 empty file is treated as no constraints, never an error.
 
 ## Tests
