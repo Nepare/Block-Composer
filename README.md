@@ -103,7 +103,7 @@ connection depends on how you run it — set up whichever one matches:
 2. **APIs & Services → Library** → search "Google Docs API" → **Enable**. (The Drive API
    is not needed — `cvdocs` never writes to Drive, only reads a Doc's content.)
 3. **APIs & Services → OAuth consent screen** → User type **External** → fill the required
-   fields → leave publishing status as **Testing** → under "Test users," add the Google
+   fields → leave publishing status as **Testing** → under "Test users" add the Google
    account that can view the Doc(s) you'll dissect (this must be the account you'll
    actually sign in with in step 5).
 4. **APIs & Services → Credentials** → **Create Credentials → OAuth client ID** →
@@ -122,17 +122,12 @@ Since the app stays in **Testing** mode (fine for personal use — no Google ver
 review needed), tokens for test users expire after about 7 days; just run
 `cvdocs auth login` again when that happens.
 
-**If Google's OAuth setup asks for an "Application home page"**: this only matters for
-brand verification (showing a custom name/logo to strangers), which a personal Testing-mode
-app never needs. Any live URL works — a GitHub repo page for this project is a normal
-choice if you push it there.
-
 #### 3.2 Hosted deployment (Docker)
 
-Running `cvdocs` as a Docker container uses a *different* Google connection method than the local CLI — a browser-based OAuth flow served over HTTP,
-since there's no local machine for a browser popup to talk to. This needs its own Google
-OAuth client (a **Web application** client, not the Desktop-app one from 3.1) plus a secret
-of its own:
+Running `cvdocs` as a Docker container uses a *different* Google connection method than the local 
+CLI — a browser-based OAuth flow served over HTTP, since there's no local machine for a browser 
+popup to talk to. This needs its own Google OAuth client (a **Web application** client, not the 
+Desktop-app one from 3.1) plus a secret of its own:
 
 1. In the same Google Cloud project as 3.1, go to **APIs & Services → Credentials**
    → **Create Credentials → OAuth client ID** → Application type **Web application**.
@@ -150,25 +145,22 @@ of its own:
    connect. `docker compose exec app cvdocs auth status` confirms it from inside the
    container.
 
-This is a single shared connection for the whole deployment (not one per visiting user),
-and is entirely independent of the local CLI's own connection from 3.1 — connecting one
-doesn't connect the other.
+This is a single shared connection for the whole deployment (not one per visiting user).
 
 ## Usage
 
 ### Web UI
 
-A React + TypeScript SPA lives in `frontend/` (Vite, Tailwind CSS v4, shadcn/ui, bun-managed).
-It's served same-origin by the FastAPI app — no separate frontend host, no CORS config. On first
-visit, paste the shared `CVDOCS_API_KEY` secret into the login screen; it's validated against
-`GET /auth/check` and persisted in the browser so subsequent visits skip the prompt. The Library
-tab browses/generates/mutates/dissects blocks; the Compose tab drives a composition from a
-description to a finished result, with a history sidebar to revisit past ones.
+On first visit, paste the shared `CVDOCS_API_KEY` secret into the login screen; it's validated 
+against `GET /auth/check` and persisted in the browser so subsequent visits skip the prompt. 
+The Library tab browses/generates/mutates/dissects blocks; the Compose tab drives a composition 
+from a description to a finished result, with a history sidebar to revisit past ones.
 
-Local frontend development: `cd frontend && bun install && bun dev` (proxies to a separately
-running backend). Building it manually: `bun run build` (produces `frontend/dist`, served by the
-backend when present). The Docker image below builds and serves it automatically — no separate
-step needed.
+The intended way to use Web GUI is via Docker. This command handles the entire process: 
+```
+docker compose build                                # builds the image
+docker compose up                                   # runs the container
+```
 
 ### CLI
 
@@ -176,43 +168,43 @@ Requires Setup 1 (OpenRouter) and Setup 3.1 (Google OAuth, local CLI); Setup 2 (
 matters if you're using the default local `naming` model.
 
 ```
-cvdocs auth login                                    # once
-cvdocs dissect <google-doc-url>                       # populate output/blocks/
+cvdocs auth login                                   # once
+cvdocs dissect <google-doc-url>                     # populate output/blocks/
 
-cvdocs blocks list                                    # see what's there
+cvdocs blocks list                                  # see what's there
 cvdocs blocks list --tag <tag>
-cvdocs blocks list --query <text>                      # substring search over name/body
-cvdocs blocks show <block-id>
-cvdocs blocks delete <block-id>                        # permanent — no undo
-cvdocs blocks preserve <block-id>                      # lock — exempt from `blocks clear`
-cvdocs blocks unpreserve <block-id>                    # unlock
-cvdocs blocks clear                                    # delete every non-preserved block
+cvdocs blocks list --query <text>                   # substring search over name/body
+cvdocs blocks show <id>
+cvdocs blocks delete <id>                           # permanent — no undo
+cvdocs blocks preserve <id>                         # lock — exempt from `blocks clear`
+cvdocs blocks unpreserve <id>                       # unlock
+cvdocs blocks clear                                 # delete every non-preserved block
 
-cvdocs generate --criteria "<what you want>"           # new block from scratch
-cvdocs generate -f criteria.md                          # ...or read criteria from a file
-cvdocs generate --criteria "<...>" --name <name>        # skip the naming call, use this name
-cvdocs generate --criteria "<...>" --preserve            # lock the produced block on creation
-cvdocs mutate <block-id> --criteria "<how to change it>"  # adapt an existing block
-cvdocs mutate <block-id> -f criteria.md                  # ...or read criteria from a file
-cvdocs mutate <block-id> --criteria "<...>" --name <name>  # skip the naming call, use this name
-cvdocs mutate <block-id> --criteria "<...>" --preserve      # lock the produced block on creation
+cvdocs generate --criteria "<what you want>"        # new block from scratch
+cvdocs generate -f criteria.md                      # ...or read criteria from a file
+cvdocs generate --criteria "<...>" --name <name>    # skip the naming call, use this name
+cvdocs generate --criteria "<...>" --preserve       # lock the produced block on creation
+cvdocs mutate <id> --criteria "<how to change it>"  # adapt an existing block
+cvdocs mutate <id> -f criteria.md                   # ...or read criteria from a file
+cvdocs mutate <id> --criteria "<...>" --name <name> # skip the naming call, use this name
+cvdocs mutate <id> --criteria "<...>" --preserve    # lock the produced block on creation
 
-cvdocs compose "<natural-language request>"            # writes output/results/<name>.md
-cvdocs compose -f request.md                            # ...or read the request from a file
-cvdocs compose "<request>" --dry-run                    # show the plan, write nothing
-cvdocs compose "<request>" --name <name>                # skip the naming call, use this name
-cvdocs compose "<request>" --preserve                    # lock the produced result on creation
-cvdocs compose "<request>" --restrict-generate           # forbid brand-new blocks in the result
-cvdocs compose "<request>" --restrict-mutate             # forbid edited variants; existing blocks used as-is
-cvdocs compose "<request>" --from-blocks <block-id> --from-blocks <block-id>  # restrict candidates to exactly these blocks
+cvdocs compose "<natural-language request>"         # writes output/results/<name>.md
+cvdocs compose -f request.md                        # ...or read the request from a file
+cvdocs compose "<request>" --dry-run                # show the plan, write nothing
+cvdocs compose "<request>" --name <name>            # skip the naming call, use this name
+cvdocs compose "<request>" --preserve               # lock the produced result on creation
+cvdocs compose "<request>" --restrict-generate      # forbid brand-new blocks in the result
+cvdocs compose "<request>" --restrict-mutate        # forbid edited variants; existing blocks used as-is
+cvdocs compose "<request>" --from-blocks <id> --from-blocks <id>  # restrict candidates to exactly these blocks
 
-cvdocs results list                                    # browse saved compose results
-cvdocs results list --query <text>                     # substring search over name/content
-cvdocs results show <result-id>                        # content + the request/plan behind it
-cvdocs results delete <result-id>                      # permanent — no undo
-cvdocs results preserve <result-id>                    # lock — exempt from `results clear`
-cvdocs results unpreserve <result-id>                  # unlock
-cvdocs results clear                                   # delete every non-preserved result
+cvdocs results list                                 # browse saved compose results
+cvdocs results list --query <text>                  # substring search over name/content
+cvdocs results show <result-id>                     # content + the request/plan behind it
+cvdocs results delete <result-id>                   # permanent — no undo
+cvdocs results preserve <result-id>                 # lock — exempt from `results clear`
+cvdocs results unpreserve <result-id>               # unlock
+cvdocs results clear                                # delete every non-preserved result
 ```
 
 `-f`/`--criteria-file` (`generate`/`mutate`) and `-f`/`--request-file` (`compose`) read a
@@ -232,93 +224,45 @@ so every existing block in the result appears exactly as originally authored The
 independent and may be combined, in which case the result is built entirely from existing
 blocks used exactly as-is.
 
-`compose`'s repeatable `--from-blocks <block-id>` restricts the planner's candidate pool to
+`compose`'s repeatable `--from-blocks <id>` restricts the planner's candidate pool to
 exactly the designated blocks. Brand-new content is fully disabled for the call , while mutation 
 of a designated block stays available unless `--restrict-mutate` is also passed.
 
 ### HTTP
 
 Requires the hosted deployment from [Setup 3.2](#32-hosted-deployment-docker)
-(Docker, Web OAuth client, `CVDOCS_API_KEY`).
+(Docker, Web OAuth client, `CVDOCS_API_KEY`). Every route below is gated by the same
+`?key=<CVDOCS_API_KEY>` credential as `/auth/google/login`.
 
-Once the service is running, `generate`, `mutate`, `dissect`, and `compose` are reachable over
-HTTP, gated by the same `?key=<CVDOCS_API_KEY>` credential as `/auth/google/login`:
+```
+POST /generate/start                    # start a generate job -> {"job_id"}
+POST /mutate/start                      # start a mutate job -> {"job_id"}
+POST /dissect/start                     # start a dissect job -> {"job_id"}
+POST /compose/start                     # start a compose job -> {"job_id"}
+GET  /stream/{job_id}                   # SSE progress + final outcome for any job
+POST /cancel/{job_id}                   # cancel a running compose job
 
-- `POST /generate/start` / `POST /mutate/start` / `POST /dissect/start` — same inputs as the
-  CLI's `generate`/`mutate`/`dissect` commands (JSON body), return `{"job_id": "..."}`
-  immediately rather than blocking until the LLM call finishes. `generate`/`mutate` also accept
-  the CLI's `name` (skip the naming-model call, `_2`/`_3`/... on collision) and `preserve`
-  (lock the produced block on creation) fields. `dissect` additionally rejects
-  immediately, before any work starts, if the deployment isn't configured for hosted-mode
-  Google connections, or is configured but has no valid stored connection yet — run the
-  `/auth/google/login` flow from [3.2](#32-hosted-deployment-docker) first.
-- `POST /compose/start` — same inputs as the CLI's `compose` command, plus a `specifiers` field
-  (a shorter free-text field merged into `request` server-side) — accepts `request`,
-  `specifiers`, `count` (`null` lets the model decide), `model`,
-  `name` (skip the naming-model call, `_2`/`_3`/... on collision), `preserve` (lock the produced
-  result on creation), `max_generate`, `restrict_generate`, `restrict_mutate`, and
-  `from_block_ids`; no filesystem output path or dry-run mode over HTTP. `restrict_generate`
-  forbids the planner from producing any brand-new block (rejected up front, before any work
-  starts, if the library overall can't
-  supply enough blocks for the request, naming the shortfall; the candidate-narrowing window is
-  widened automatically with a distinct warning if it's just configured too small); `restrict_mutate`
-  forbids any edited variant of an existing block, so every existing block in the result appears
-  exactly as originally authored. Both default to `false` and may be combined. `from_block_ids`
-  (`list[str]`, defaults to `null`/omitted) restricts the candidate pool to exactly the given
-  block ids instead of the whole library — same duplicate-collapsing, unresolvable-id rejection,
-  empty-list rejection, and set-scoped feasibility/widening behavior
-  as the CLI's `--from-blocks` (see above); brand-new content is fully disabled for the call
-  regardless of `restrict_generate`. Also returns
-  `{"job_id": "..."}` immediately. Unlike the other three tools, a compose run is
-  cancellable — see `POST /cancel/{job_id}` below. Its final outcome includes the finished
-  document's `content`, saved `name`/`result_id`, and the ordered `slots` that produced it
-  (`result_id`/`name`/`content` are `null` if the run was cancelled instead of completing).
-- `GET /stream/{job_id}` — a single Server-Sent Events route shared across all four tools,
-  streaming that run's progress and ending in one final `event: complete` line with the
-  outcome (the produced block's id(s), the composed document, or an error). Reconnecting after
-  a run has already finished still replays its full history.
-- `POST /cancel/{job_id}` — a generic cancellation endpoint. Only compose jobs support it today;
-  cancelling a generate/mutate/dissect job (or a compose job that's no longer running) returns
-  `400` with a reason rather than silently doing nothing. Cancelling a running compose job stops
-  it at its next step boundary, keeps every block/mutation already produced, and reports
-  `"status": "cancelled"` on the stream's terminal event — generate/mutate/dissect stay
-  cancel-less, each being a single short LLM call chain not worth interrupting mid-flight.
+GET  /blocks                            # list blocks, optional query/tag filters
+GET  /blocks/{id}                       # one block's full content
+PUT  /blocks/{id}                       # replace a block's body/tags/schema
+DELETE /blocks/{id}                     # delete a block
+POST /blocks/{id}/preserve              # lock a block
+POST /blocks/{id}/unpreserve            # unlock a block
+POST /blocks/clear                      # delete every non-preserved block
 
-The block library and results history are also reachable over HTTP, gated by the same `key`.
-Unlike the routes above, all of these respond synchronously with the requested data directly —
-none of them return a `job_id` or involve `/stream`:
+GET  /results                           # list saved compose results, optional query filter
+GET  /results/{id}                      # one result's full content + slots
+DELETE /results/{id}                    # delete a saved result
+POST /results/{id}/preserve             # lock a result
+POST /results/{id}/unpreserve           # unlock a result
+POST /results/{id}/rename               # rename a result
+POST /results/clear                     # delete every non-preserved result
+```
 
-- `GET /blocks` — every block in the library, each as a summary (`id`, `name`, `tags`, `schema`,
-  `source`, `created_at`, `preserved`, no `body`); optional `query` (substring over name/body) and
-  repeatable `tag` params, same filtering as `cvdocs blocks list`.
-- `GET /blocks/{id}` — one block's full content plus `preserved`, matching `cvdocs blocks show`;
-  `404` if the id doesn't exist.
-- `PUT /blocks/{id}` — replaces an existing block's `body` in place; `tags`/`schema` are optional
-  and left unchanged when omitted. Never creates a new block — `404` if the id doesn't exist,
-  `400` if `body` is blank. The block's id, origin, and generation history are never altered by an
-  edit.
-- `DELETE /blocks/{id}` — permanently removes a block; `404` if the id doesn't exist. No cascade —
-  any saved result that referenced this block keeps its own copy of what it used. Works on a
-  preserved block too — HTTP has no lock-enforced delete, unlike a future frontend's disabled
-  button.
-- `POST /blocks/{id}/preserve` / `POST /blocks/{id}/unpreserve` — lock/unlock a block; `404` if
-  the id doesn't exist.
-- `POST /blocks/clear` — deletes every non-preserved block; returns `{"deleted": N,
-  "skipped_preserved": N}`.
-- `GET /results` — every saved compose result, each as a summary (`id`, `name`, `request`,
-  `created_at`, `preserved`, no `content`); optional `query` (substring over name/content), same
-  as `cvdocs results list`.
-- `GET /results/{id}` — one result's full content plus `slots`
-  and `preserved`, matching `cvdocs results show`; `404` if the id doesn't exist.
-- `DELETE /results/{id}` — permanently removes a saved result; `404` if the id doesn't exist.
-  Works on a preserved result too, same as `DELETE /blocks/{id}`.
-- `POST /results/{id}/preserve` / `POST /results/{id}/unpreserve` — lock/unlock a result; `404`
-  if the id doesn't exist.
-- `POST /results/{id}/rename` — renames a saved result; `400` if the new name is blank/whitespace,
-  `404` if the id doesn't exist. Only the name changes — content, slots, and the id/on-disk
-  location are untouched.
-- `POST /results/clear` — deletes every non-preserved result; returns `{"deleted": N,
-  "skipped_preserved": N}`.
+`generate`/`mutate`/`dissect` take the same inputs as their CLI commands; `compose` takes the
+same inputs as its CLI command plus a `specifiers` field (short free text merged into `request`)
+and has no filesystem output path or dry-run mode. Unlike the other three, compose is
+cancellable and its stream outcome includes the finished document.
 
 ```
 curl -X POST "http://localhost:8000/generate/start?key=<CVDOCS_API_KEY>" \
@@ -333,30 +277,16 @@ curl -N "http://localhost:8000/stream/<id>?key=<CVDOCS_API_KEY>"
 
 `config.yaml` (committed — no secrets live in it) is grouped into four sections:
 
-- `llm.*` — which `provider:model-id` handles each task (`llm.models.generate`, `.mutate`,
-  `.compose`, `.naming`), plus provider connection settings (`llm.openrouter.*`,
-  `llm.ollama.*`). Mix and match freely — e.g. push the expensive planning work to a strong
-  hosted model while keeping cheap tasks fully local and free.
-- `path.*` — filesystem locations: `path.blocks_dir` / `path.results_dir` (default
-  `output/blocks`, `output/results`), `path.templates_path` (see `templates.yaml`, which
-  declares the shape of a "block" inside a source Doc — dissection is fully deterministic
-  against a doc matching that shape, no LLM calls at all), `path.sample_blocks_dir` (the
-  fallback style examples `generate` learns from when the library is still empty),
-  `path.storage.*` (which storage backend, and its DB path), and `path.constraints.*` (paths
-  to the `input_prompts/constraints/*.md` files, see below).
-- `behavior.compose.*` — compose's own tuning knobs (candidate-narrowing size/reserve, keyword
-  counts).
-- `auth.*` — `auth.google.web_client_id_env` / `.web_client_secret_env` / `.web_redirect_uri`
-  (hosted-deployment-only, see [Setup 3.2](#32-hosted-deployment-docker);
-  the first two name env vars, never hold secrets themselves) and
-  `auth.web_service.api_key_env` (names the env var holding the hosted deployment's shared
-  authorization credential, also hosted-only).
+- `llm.*` — which `provider:model-id` handles each task, plus provider connection settings. 
+  Mix and match freely — e.g. push the expensive planning work to a strong hosted model 
+  while keeping cheap tasks fully local and free.
+- `path.*` — filesystem locations.
+- `behavior.compose.*` — compose's own tuning knobs.
+- `auth.*` — env names and paths to secrets and tokens, as well as auth redirect URI.
 
-Two settings differ between local CLI and the hosted Docker deployment —
-`llm.ollama.base_url`/`docker_base_url` and `path.storage.backend`/`docker_backend` — and
-both values are checked into `config.yaml` side by side. Which one applies is detected
-automatically at runtime (checking for `/.dockerenv`), never via an environment variable or
-a manual edit — the same unmodified `config.yaml` is correct in both contexts.
+If some settings are applicable only to certain deployment type (CLI/hosted), there are
+config fields for both. There's no need to change configs when changing deployment types,
+since all variants live in the same file.
 
 Secrets never live in `config.yaml` — only the *names* of the env vars that hold them do.
 They live in a gitignored `.env` instead: `OPENROUTER_API_KEY` always; `GOOGLE_WEB_CLIENT_ID`,
