@@ -1,4 +1,4 @@
-# cvdocs
+# Block Composer
 
 A configurable block library and composer, sourced from Google Docs. It dissects a source
 Google Doc into reusable **blocks** (flat Markdown files with YAML frontmatter), lets you
@@ -7,7 +7,7 @@ from a natural-language request by reusing, adapting, or generating blocks as ne
 
 ## Requirements
 
-`cvdocs` needs:
+`Block Composer` needs:
 
 - A Google account that can view the source Doc(s) you want to dissect
 - A free [OpenRouter](https://openrouter.ai) account (for `generate`/`mutate`/`compose`)

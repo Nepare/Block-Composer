@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ResultDetail } from "@/features/compose/api";
+import type { ClearResultsResult, ResultDetail } from "@/features/compose/api";
 import { HistorySidebar } from "@/features/compose/HistorySidebar";
 import { ResultPanel } from "@/features/compose/ResultPanel";
 import { SpecificationsPanel } from "@/features/compose/SpecificationsPanel";
@@ -18,19 +18,51 @@ export function ComposePane({ composeJob }: ComposePaneProps) {
   const [freshKey, setFreshKey] = useState(0);
   const resultsHistory = useResultsHistory();
   const previousStatusRef = useRef(composeJob.status);
+  // Once a resultId has been observed in the history list, treat it as permanently bridged —
+  // otherwise deleting/clearing it later would make it look "not yet arrived" again and the
+  // pending placeholder would come back from the dead.
+  const bridgedResultIdsRef = useRef<Set<string>>(new Set());
+  if (
+    composeJob.status === "done" &&
+    composeJob.resultId != null &&
+    resultsHistory.summaries.some((summary) => summary.id === composeJob.resultId)
+  ) {
+    bridgedResultIdsRef.current.add(composeJob.resultId);
+  }
 
   const isPendingVisible =
     composeJob.status === "running" ||
     (composeJob.status === "done" &&
       composeJob.resultId != null &&
-      !resultsHistory.summaries.some((summary) => summary.id === composeJob.resultId));
+      !bridgedResultIdsRef.current.has(composeJob.resultId));
+
+  async function handleDelete(id: string): Promise<boolean> {
+    const ok = await resultsHistory.deleteResult(id);
+    if (ok && displayMode.type === "history" && displayMode.resultId === id) {
+      setDisplayMode({ type: "fresh" });
+    }
+    return ok;
+  }
+
+  async function handleClearHistory(): Promise<ClearResultsResult | null> {
+    const viewedId = displayMode.type === "history" ? displayMode.resultId : null;
+    const viewedSummary = viewedId ? resultsHistory.summaries.find((summary) => summary.id === viewedId) : null;
+    const result = await resultsHistory.clearHistory();
+    if (result && viewedId && !viewedSummary?.preserved) {
+      setDisplayMode({ type: "fresh" });
+    }
+    return result;
+  }
 
   useEffect(() => {
     if (previousStatusRef.current !== "done" && composeJob.status === "done") {
       resultsHistory.refetch();
+      if (composeJob.resultId != null) {
+        setDisplayMode({ type: "history", resultId: composeJob.resultId });
+      }
     }
     previousStatusRef.current = composeJob.status;
-  }, [composeJob.status, resultsHistory]);
+  }, [composeJob.status, composeJob.resultId, resultsHistory]);
 
   useEffect(() => {
     if (displayMode.type !== "history") {
@@ -64,8 +96,8 @@ export function ComposePane({ composeJob }: ComposePaneProps) {
         onRename={resultsHistory.renameResult}
         onPreserve={resultsHistory.preserveResult}
         onUnpreserve={resultsHistory.unpreserveResult}
-        onDelete={resultsHistory.deleteResult}
-        onClearHistory={resultsHistory.clearHistory}
+        onDelete={handleDelete}
+        onClearHistory={handleClearHistory}
       />
       <div className="flex min-h-0 min-w-0 flex-1">
         <div className="w-96 shrink-0 overflow-y-auto border-r">

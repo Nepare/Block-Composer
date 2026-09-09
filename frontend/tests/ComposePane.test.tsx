@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ComposePane } from "@/features/compose/ComposePane";
 import type { UseComposeJobResult } from "@/features/compose/useComposeJob";
@@ -236,4 +236,124 @@ test("the pending entry disappears immediately on cancelled or error status", as
 
   rerender(<ComposePane composeJob={fakeComposeJob({ status: "error" })} />);
   expect(screen.queryByTestId("history-pending-entry")).not.toBeInTheDocument();
+});
+
+test("the pending entry does not come back after its bridged result is later removed from history", async () => {
+  vi.mocked(api.listResults)
+    .mockResolvedValueOnce([{ id: "r1", name: "Past Composition", request: "req", created_at: null, preserved: false }])
+    .mockResolvedValueOnce([
+      { id: "r1", name: "Past Composition", request: "req", created_at: null, preserved: false },
+      { id: "new-result", name: "New Composition", request: "req", created_at: null, preserved: false },
+    ]);
+  vi.mocked(api.clearResults).mockResolvedValue({
+    ok: true,
+    json: async () => ({ deleted: 2, skipped_preserved: 0 }),
+  } as Response);
+  const user = userEvent.setup();
+
+  const { rerender } = render(<ComposePane composeJob={fakeComposeJob({ status: "running" })} />);
+  await screen.findByText("Past Composition");
+
+  rerender(<ComposePane composeJob={fakeComposeJob({ status: "done", resultId: "new-result" })} />);
+  await waitFor(() => expect(screen.getAllByTestId("history-entry")).toHaveLength(2));
+  expect(screen.queryByTestId("history-pending-entry")).not.toBeInTheDocument();
+
+  // clearHistory's own effects remove both entries from the list (nothing preserved)
+  vi.mocked(api.listResults).mockResolvedValueOnce([]);
+  await user.click(screen.getByRole("button", { name: "Clear history" }));
+  await user.click(screen.getByRole("button", { name: /confirm/i }));
+
+  await waitFor(() => expect(screen.queryAllByTestId("history-entry")).toHaveLength(0));
+  // composeJob.status/resultId are unchanged ("done"/"new-result") — without the bridged-id
+  // latch this would look exactly like the not-yet-arrived case again and resurrect the spinner.
+  expect(screen.queryByTestId("history-pending-entry")).not.toBeInTheDocument();
+});
+
+test("deleting the currently-viewed history entry returns the result panel to the idle/fresh view", async () => {
+  vi.mocked(api.getResult).mockResolvedValue({
+    id: "r1",
+    name: "Past Composition",
+    request: "Build a great resume",
+    created_at: null,
+    preserved: false,
+    content: "finished content",
+    slots: [],
+  });
+  vi.mocked(api.deleteResult).mockResolvedValue({ ok: true } as Response);
+  const user = userEvent.setup();
+
+  render(<ComposePane composeJob={fakeComposeJob({ status: "idle" })} />);
+
+  await user.click(await screen.findByText("Past Composition"));
+  expect(await screen.findByTestId("result-panel-history")).toBeInTheDocument();
+
+  const entry = screen.getByTestId("history-entry");
+  await user.click(within(entry).getByRole("button", { name: "Delete" }));
+  await user.click(screen.getByRole("checkbox"));
+  await user.click(screen.getByRole("button", { name: /confirm/i }));
+
+  await waitFor(() => expect(api.deleteResult).toHaveBeenCalledWith("r1"));
+  expect(screen.queryByTestId("result-panel-history")).not.toBeInTheDocument();
+  expect(screen.getByTestId("result-panel-idle")).toBeInTheDocument();
+});
+
+test("clearing history while viewing a non-preserved entry returns to the idle/fresh view", async () => {
+  vi.mocked(api.getResult).mockResolvedValue({
+    id: "r1",
+    name: "Past Composition",
+    request: "Build a great resume",
+    created_at: null,
+    preserved: false,
+    content: "finished content",
+    slots: [],
+  });
+  vi.mocked(api.clearResults).mockResolvedValue({
+    ok: true,
+    json: async () => ({ deleted: 1, skipped_preserved: 0 }),
+  } as Response);
+  const user = userEvent.setup();
+
+  render(<ComposePane composeJob={fakeComposeJob({ status: "idle" })} />);
+
+  await user.click(await screen.findByText("Past Composition"));
+  expect(await screen.findByTestId("result-panel-history")).toBeInTheDocument();
+
+  vi.mocked(api.listResults).mockResolvedValueOnce([]);
+  await user.click(screen.getByRole("button", { name: "Clear history" }));
+  await user.click(screen.getByRole("button", { name: /confirm/i }));
+
+  await waitFor(() => expect(api.clearResults).toHaveBeenCalledTimes(1));
+  expect(screen.queryByTestId("result-panel-history")).not.toBeInTheDocument();
+  expect(screen.getByTestId("result-panel-idle")).toBeInTheDocument();
+});
+
+test("clearing history while viewing a preserved entry keeps it displayed (it survives the clear)", async () => {
+  vi.mocked(api.listResults).mockResolvedValue([
+    { id: "r1", name: "Past Composition", request: "req", created_at: null, preserved: true },
+  ]);
+  vi.mocked(api.getResult).mockResolvedValue({
+    id: "r1",
+    name: "Past Composition",
+    request: "Build a great resume",
+    created_at: null,
+    preserved: true,
+    content: "finished content",
+    slots: [],
+  });
+  vi.mocked(api.clearResults).mockResolvedValue({
+    ok: true,
+    json: async () => ({ deleted: 0, skipped_preserved: 1 }),
+  } as Response);
+  const user = userEvent.setup();
+
+  render(<ComposePane composeJob={fakeComposeJob({ status: "idle" })} />);
+
+  await user.click(await screen.findByText("Past Composition"));
+  expect(await screen.findByTestId("result-panel-history")).toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "Clear history" }));
+  await user.click(screen.getByRole("button", { name: /confirm/i }));
+
+  await waitFor(() => expect(api.clearResults).toHaveBeenCalledTimes(1));
+  expect(screen.getByTestId("result-panel-history")).toBeInTheDocument();
 });
