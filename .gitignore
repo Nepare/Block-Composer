@@ -12,9 +12,10 @@ output/cvdocs.db
 
 # Agent state
 .claude/
+CLAUDE.md
 
 # Specify sessions
-.specify/
+.specify
 specs/
 
 # Graphify knowledge graph
