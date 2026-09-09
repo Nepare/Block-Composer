@@ -30,6 +30,17 @@ def test_compose_prompt_appends_constraints_to_system_message():
     assert "Prefer mutate over generate." in messages[0]["content"]
 
 
+def test_compose_prompt_warns_against_reusing_a_project_by_tags():
+    for allow_mutate in (True, False):
+        for allow_generate in (True, False):
+            messages = compose_prompt(
+                "a request", [], allow_mutate=allow_mutate, allow_generate=allow_generate
+            )
+            system = messages[0]["content"]
+            assert "same `tags` list" in system
+            assert "claim at most one block from that group" in system
+
+
 def test_result_name_prompt_appends_constraints_to_system_message():
     messages = result_name_prompt("some content", constraints="No superlatives.")
     assert "No superlatives." in messages[0]["content"]

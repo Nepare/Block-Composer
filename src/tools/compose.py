@@ -42,10 +42,17 @@ def _catalog(blocks: list[Block]) -> list[dict]:
     return [{"id": b.id, "tags": b.tags, "body": b.body.strip()} for b in blocks]
 
 
-def _next_unused_candidate(candidates: list[Block], claimed_ids: set[str]) -> str | None:
+def _tag_signature(block: Block) -> tuple[str, ...]:
+    """Identifies the underlying project a block belongs to. mutate.py copies the source's tags
+    onto every variant verbatim, so identical tags means the same project (or a sibling variant
+    of it) — untagged blocks carry no such signal and are each their own singleton."""
+    return tuple(sorted(block.tags)) if block.tags else (f"__id__:{block.id}",)
+
+
+def _next_unused_candidate(candidates: list[Block], claimed_signatures: set[tuple[str, ...]]) -> Block | None:
     for block in candidates:
-        if block.id not in claimed_ids:
-            return block.id
+        if _tag_signature(block) not in claimed_signatures:
+            return block
     return None
 
 
@@ -157,6 +164,7 @@ def _plan_with_llm(
         required_count=required_count,
         pool_override=pool_override,
     )
+    id_to_block = {b.id: b for b in candidate_blocks}
     catalog = _catalog(candidate_blocks)
     compose_constraints = constraints_module.load(settings, "compose")
     messages = compose_prompt(
@@ -239,27 +247,54 @@ def _plan_with_llm(
         except LLMError:
             pass  # keep whatever `slots` already held from the last successfully-parsed attempt
 
-    claimed_ids = set()
+    def sig_for(block_id: str) -> tuple[str, ...]:
+        block = id_to_block.get(block_id)
+        return _tag_signature(block) if block is not None else (f"__id__:{block_id}",)
+
+    claimed_signatures: set[tuple[str, ...]] = set()
+    unresolved_duplicates: list[ComposeSlot] = []
     corrected_slots = []
     for s in slots:
         if restrict_generate and s.action == "generate":
-            new_id = _next_unused_candidate(candidate_blocks, claimed_ids)
-            if new_id is not None:
-                claimed_ids.add(new_id)
-                s = ComposeSlot(order=s.order, action="use", block_id=new_id, criteria=None)
+            replacement = _next_unused_candidate(candidate_blocks, claimed_signatures)
+            if replacement is not None:
+                claimed_signatures.add(_tag_signature(replacement))
+                s = ComposeSlot(order=s.order, action="use", block_id=replacement.id, criteria=None)
         elif restrict_mutate and s.action == "mutate":
-            if s.block_id and s.block_id not in claimed_ids:
-                claimed_ids.add(s.block_id)
+            if s.block_id and sig_for(s.block_id) not in claimed_signatures:
+                claimed_signatures.add(sig_for(s.block_id))
                 s = ComposeSlot(order=s.order, action="use", block_id=s.block_id, criteria=None)
             else:
-                new_id = _next_unused_candidate(candidate_blocks, claimed_ids)
-                if new_id is not None:
-                    claimed_ids.add(new_id)
-                    s = ComposeSlot(order=s.order, action="use", block_id=new_id, criteria=None)
-        elif s.block_id:
-            claimed_ids.add(s.block_id)
+                replacement = _next_unused_candidate(candidate_blocks, claimed_signatures)
+                if replacement is not None:
+                    claimed_signatures.add(_tag_signature(replacement))
+                    s = ComposeSlot(order=s.order, action="use", block_id=replacement.id, criteria=None)
+                elif not restrict_generate:
+                    s = ComposeSlot(order=s.order, action="generate", block_id=None, criteria=s.criteria or request)
+                else:
+                    unresolved_duplicates.append(s)
+        elif s.action in ("use", "mutate") and s.block_id:
+            sig = sig_for(s.block_id)
+            if sig not in claimed_signatures:
+                claimed_signatures.add(sig)
+            else:
+                replacement = _next_unused_candidate(candidate_blocks, claimed_signatures)
+                if replacement is not None:
+                    claimed_signatures.add(_tag_signature(replacement))
+                    s = ComposeSlot(order=s.order, action="use", block_id=replacement.id, criteria=None)
+                elif not restrict_generate:
+                    s = ComposeSlot(order=s.order, action="generate", block_id=None, criteria=s.criteria or request)
+                else:
+                    unresolved_duplicates.append(s)
         corrected_slots.append(s)
     slots = corrected_slots
+
+    if unresolved_duplicates:
+        request_desc = f"requested {required_count} project(s)" if required_count is not None else "the plan"
+        raise BlockValidationError(
+            f"--restrict-generate: {request_desc}, but only {len(claimed_signatures)} distinct "
+            "project(s) are available."
+        )
 
     if required_count is not None and len(slots) != required_count:
         ordered_slots = sorted(slots, key=lambda s: s.order)
@@ -269,14 +304,16 @@ def _plan_with_llm(
             next_order = (max((s.order for s in ordered_slots), default=0)) + 1
             shortfall = required_count - len(ordered_slots)
             if restrict_generate:
-                claimed_ids = {s.block_id for s in ordered_slots if s.block_id}
+                claimed_signatures = {sig_for(s.block_id) for s in ordered_slots if s.block_id}
                 padding = []
                 for i in range(shortfall):
-                    new_id = _next_unused_candidate(candidate_blocks, claimed_ids)
-                    if new_id is None:
+                    replacement = _next_unused_candidate(candidate_blocks, claimed_signatures)
+                    if replacement is None:
                         break
-                    claimed_ids.add(new_id)
-                    padding.append(ComposeSlot(order=next_order + i, action="use", block_id=new_id, criteria=None))
+                    claimed_signatures.add(_tag_signature(replacement))
+                    padding.append(
+                        ComposeSlot(order=next_order + i, action="use", block_id=replacement.id, criteria=None)
+                    )
             else:
                 padding = [
                     ComposeSlot(order=next_order + i, action="generate", block_id=None, criteria=request)

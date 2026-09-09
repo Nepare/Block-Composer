@@ -87,7 +87,14 @@ def _compose_system(allow_mutate: bool, allow_generate: bool) -> str:
         )
     steps_block = ",\n".join(f"    {step}" for step in example_steps)
     system += (
-        "\nAlso decide the final order the pieces should appear in, per the request's own "
+        "\nBlocks in the catalog that share the exact same `tags` list are the same underlying "
+        "project — either literally the same catalog entry, or a project and an already-mutated "
+        "variant of it. Treat any such group as one project: across the whole plan, claim at most "
+        "one block from that group (via use or mutate), never two. If multiple parts of the "
+        "request would otherwise need the same project, either mutate a different, still-unclaimed "
+        "project instead, or generate, rather than claiming a project already used by an earlier "
+        "step.\n\n"
+        "Also decide the final order the pieces should appear in, per the request's own "
         "ordering logic if it states one.\n\n"
         "Reply with ONLY a JSON object of this shape, nothing else:\n"
         "{\n"

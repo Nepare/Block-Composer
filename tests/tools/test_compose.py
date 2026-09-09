@@ -962,6 +962,118 @@ def test_both_restrictions_together_produce_use_only_plan(settings, fake_router)
     assert {s.block_id for s in outcome.slots} == {"school", "police_station"}
 
 
+def test_duplicate_block_id_across_slots_is_reassigned_to_a_different_project(settings, fake_router):
+    _seed_library(settings)
+    plan = json.dumps(
+        {
+            "steps": [
+                {"order": 1, "action": "use", "block_id": "school", "criteria": None},
+                {"order": 2, "action": "mutate", "block_id": "school", "criteria": "re-theme"},
+            ]
+        }
+    )
+    client = FakeLLMClient(replies=[plan, "result_name"])
+    fake_router(compose_module, client)
+
+    outcome = compose_module.run_compose("need two entries", settings=settings, count=2)
+
+    assert len(outcome.slots) == 2
+    assert all(s.action == "use" for s in outcome.slots)
+    assert {s.block_id for s in outcome.slots} == {"school", "police_station"}
+
+
+def test_blocks_sharing_identical_tags_are_treated_as_the_same_project(settings, fake_router):
+    store = FilesystemBlockStorage(settings.blocks_path)
+    store.save(Block(id="", body="## Qt Dashboard\n\nDesktop UI.\n", tags=["qt"]), filename_stem="qt_dashboard")
+    store.save(
+        Block(id="", body="## Qt Dashboard Backend\n\nBackend-focused variant.\n", tags=["qt"]),
+        filename_stem="qt_dashboard_mut_backend",
+    )
+    store.save(Block(id="", body="## Police Station\n\nRegular station.\n"), filename_stem="police_station")
+    plan = json.dumps(
+        {
+            "steps": [
+                {"order": 1, "action": "use", "block_id": "qt_dashboard", "criteria": None},
+                {"order": 2, "action": "use", "block_id": "qt_dashboard_mut_backend", "criteria": None},
+            ]
+        }
+    )
+    client = FakeLLMClient(replies=[plan, "result_name"])
+    fake_router(compose_module, client)
+
+    outcome = compose_module.run_compose("need two entries", settings=settings, count=2)
+
+    assert len(outcome.slots) == 2
+    assert all(s.action == "use" for s in outcome.slots)
+    assert {s.block_id for s in outcome.slots} == {"qt_dashboard", "police_station"}
+
+
+def test_untagged_blocks_are_never_treated_as_siblings_of_each_other(settings, fake_router):
+    _seed_library(settings)
+    plan = json.dumps(
+        {
+            "steps": [
+                {"order": 1, "action": "use", "block_id": "school", "criteria": None},
+                {"order": 2, "action": "use", "block_id": "police_station", "criteria": None},
+            ]
+        }
+    )
+    client = FakeLLMClient(replies=[plan, "result_name"])
+    fake_router(compose_module, client)
+
+    outcome = compose_module.run_compose("need two entries", settings=settings, count=2)
+
+    assert {s.block_id for s in outcome.slots} == {"school", "police_station"}
+
+
+def test_duplicate_project_with_no_replacement_falls_back_to_generate(settings, fake_router):
+    store = FilesystemBlockStorage(settings.blocks_path)
+    store.save(Block(id="", body="## Qt Dashboard\n\nDesktop UI.\n", tags=["qt"]), filename_stem="qt_dashboard")
+    plan = json.dumps(
+        {
+            "steps": [
+                {"order": 1, "action": "mutate", "block_id": "qt_dashboard", "criteria": "backend-focus"},
+                {"order": 2, "action": "mutate", "block_id": "qt_dashboard", "criteria": "frontend-focus"},
+            ]
+        }
+    )
+    client = FakeLLMClient(replies=[plan])
+    fake_router(compose_module, client)
+
+    outcome = compose_module.run_compose("need two qt projects", settings=settings, count=2, dry_run=True)
+
+    assert len(outcome.slots) == 2
+    ordered = sorted(outcome.slots, key=lambda s: s.order)
+    assert ordered[0].action == "mutate" and ordered[0].block_id == "qt_dashboard"
+    assert ordered[1].action == "generate"
+    assert ordered[1].block_id is None
+    assert ordered[1].criteria == "frontend-focus"
+
+
+def test_duplicate_project_with_no_replacement_and_restrict_generate_raises(settings, fake_router):
+    store = FilesystemBlockStorage(settings.blocks_path)
+    store.save(Block(id="", body="## Qt Dashboard\n\nDesktop UI.\n", tags=["qt"]), filename_stem="qt_dashboard")
+    store.save(
+        Block(id="", body="## Qt Dashboard Backend\n\nBackend-focused variant.\n", tags=["qt"]),
+        filename_stem="qt_dashboard_mut_backend",
+    )
+    plan = json.dumps(
+        {
+            "steps": [
+                {"order": 1, "action": "use", "block_id": "qt_dashboard", "criteria": None},
+                {"order": 2, "action": "mutate", "block_id": "qt_dashboard_mut_backend", "criteria": "re-theme"},
+            ]
+        }
+    )
+    client = FakeLLMClient(replies=[plan])
+    fake_router(compose_module, client)
+
+    with pytest.raises(BlockValidationError):
+        compose_module.run_compose(
+            "need two qt projects", settings=settings, count=2, restrict_generate=True
+        )
+
+
 def test_from_block_ids_restricts_the_candidate_pool_and_catalog(settings, fake_router):
     _seed_large_library(settings, count=5)
     plan = json.dumps({"steps": [{"order": 1, "action": "use", "block_id": "block_0", "criteria": None}]})
