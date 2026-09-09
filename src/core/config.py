@@ -84,6 +84,15 @@ class ComposeConfig(BaseModel):
     keyword_search_unmatched_reserve: int = 2  # fixed, not proportional to top_n
     keywords_per_category_min: int = 0
     keywords_per_category_max: int = 10  # hard-truncates; min isn't enforced
+    plan_max_tokens: int = 4000  # completion-token cap for the compose planner LLM call
+
+
+class MutateConfig(BaseModel):
+    max_tokens: int = 900  # completion-token cap for the mutate LLM call
+
+
+class GenerateConfig(BaseModel):
+    max_tokens: int = 900  # completion-token cap for the generate LLM call
 
 
 class StorageConfig(BaseModel):
@@ -113,6 +122,8 @@ class PathConfig(BaseModel):
 
 class BehaviorConfig(BaseModel):
     compose: ComposeConfig = Field(default_factory=ComposeConfig)
+    mutate: MutateConfig = Field(default_factory=MutateConfig)
+    generate: GenerateConfig = Field(default_factory=GenerateConfig)
 
 
 class AuthConfig(BaseModel):

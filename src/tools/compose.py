@@ -176,7 +176,8 @@ def _plan_with_llm(
         allow_generate=not restrict_generate,
     )
     progress(ProgressEvent(kind="plan_start", message=f"Planning against {len(catalog)} block(s) in the library…"))
-    reply = client.chat(messages, model, temperature=0.3, max_tokens=1200, reasoning_effort="medium")
+    plan_max_tokens = settings.behavior.compose.plan_max_tokens
+    reply = client.chat(messages, model, temperature=0.3, max_tokens=plan_max_tokens, reasoning_effort="medium")
     try:
         steps = _parse_plan_reply(reply)
     except LLMError:
@@ -190,7 +191,7 @@ def _plan_with_llm(
                 "again with ONLY the JSON object, no commentary, no code fences.",
             },
         ]
-        reply = client.chat(retry_messages, model, temperature=0.3, max_tokens=1200, reasoning_effort="medium")
+        reply = client.chat(retry_messages, model, temperature=0.3, max_tokens=plan_max_tokens, reasoning_effort="medium")
         steps = _parse_plan_reply(reply)
 
     slots = []
@@ -232,7 +233,7 @@ def _plan_with_llm(
                 "JSON object only, no commentary.",
             },
         ]
-        retry_reply = client.chat(retry_messages, model, temperature=0.3, max_tokens=1200, reasoning_effort="medium")
+        retry_reply = client.chat(retry_messages, model, temperature=0.3, max_tokens=plan_max_tokens, reasoning_effort="medium")
         try:
             retry_steps = _parse_plan_reply(retry_reply)
             slots = [

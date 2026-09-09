@@ -42,6 +42,13 @@ behavior:
     keyword_search_unmatched_reserve: 2 # number of unmatched blocks to reserve (near keyword score miss)
     keywords_per_category_min: 0
     keywords_per_category_max: 10 # range of generated keywords per category when processing a request
+    plan_max_tokens: 4000 # completion-token cap for the compose planner LLM call
+
+  mutate:
+    max_tokens: 900 # completion-token cap for the mutate LLM call
+
+  generate:
+    max_tokens: 900 # completion-token cap for the generate LLM call
 
 auth:
   google:
