@@ -1,96 +1,22 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { FileText, Grid2x2, Grid3x3, List, Plus, Search, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { FileText, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import {
-  clearBlocks,
-  deleteBlock,
-  getBlock,
-  listBlocks,
-  preserveBlock,
-  unpreserveBlock,
-  type BlockDetail,
-  type ClearBlocksResult,
-} from "@/features/library/api";
-import { BlockTile, PendingBlockTile, type LibraryBlockRecord, type LibraryViewMode } from "@/features/library/BlockTile";
-import { ConfirmDialog } from "@/features/library/ConfirmDialog";
+import { clearBlocks, deleteBlock, preserveBlock, unpreserveBlock, type ClearBlocksResult } from "@/features/library/api";
+import { BlockTile, PendingBlockTile } from "@/features/library/BlockTile";
+import { ConfirmDialog } from "@/shared/ui/ConfirmDialog";
 import { DissectDialog } from "@/features/library/DissectDialog";
 import { EditBlockDialog } from "@/features/library/EditBlockDialog";
 import { GenerateMutateDialog } from "@/features/library/GenerateMutateDialog";
 import { ViewBlockDialog } from "@/features/library/ViewBlockDialog";
 import type { JobKind, PendingJob, StartJobMeta } from "@/features/library/useLibraryJobs";
 import { Button } from "@/shared/ui/button";
-import { Input } from "@/shared/ui/input";
-import { Spinner } from "@/shared/ui/Spinner";
+import { BlockGridLayout } from "@/shared/blocks/BlockGridLayout";
+import { toBlockRecord, useBlockCatalog } from "@/shared/blocks/useBlockCatalog";
+import type { LibraryBlockRecord } from "@/shared/blocks/types";
 import { cn } from "@/shared/lib/utils";
 
 const VIEW_STORAGE_KEY = "cvdocs.libraryView";
 const DELETE_WARNING_KEY = "cvdocs.skipDeleteWarning";
-
-const VIEW_MODES: { value: LibraryViewMode; label: string; icon: typeof List }[] = [
-  { value: "list", label: "List", icon: List },
-  { value: "grid-2", label: "2-column", icon: Grid2x2 },
-  { value: "grid-3", label: "3-column", icon: Grid3x3 },
-];
-
-const FIELD_RE = /^\*\*(.+?):\*\*\s*(.*)$/;
-const BULLET_RE = /^-\s+(.+)$/;
-
-// Display-only extraction of the "**Environment:**" field from a block's body —
-// not a full port of block_fields.py's parser (that lands with the Edit dialog).
-function extractEnvironment(body: string): string[] {
-  const lines = body.split("\n");
-  let capturing = false;
-  let inline = "";
-  const bullets: string[] = [];
-
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line) continue;
-    const fieldMatch = line.match(FIELD_RE);
-    if (fieldMatch) {
-      if (capturing) break;
-      if (fieldMatch[1].trim().toLowerCase() === "environment") {
-        capturing = true;
-        inline = fieldMatch[2];
-      }
-      continue;
-    }
-    if (!capturing) continue;
-    const bulletMatch = line.match(BULLET_RE);
-    if (bulletMatch) {
-      bullets.push(bulletMatch[1].trim());
-    } else {
-      inline = `${inline} ${line}`.trim();
-    }
-  }
-
-  const text = bullets.length ? bullets.join(" ") : inline;
-  return text
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-}
-
-function toLibraryBlock(detail: BlockDetail): LibraryBlockRecord {
-  return {
-    id: detail.id,
-    name: detail.name,
-    created_at: detail.created_at,
-    created_by: detail.created_by,
-    environment: extractEnvironment(detail.body),
-    preserved: detail.preserved,
-  };
-}
-
-function loadStoredViewMode(): LibraryViewMode {
-  try {
-    const stored = localStorage.getItem(VIEW_STORAGE_KEY);
-    if (stored === "list" || stored === "grid-2" || stored === "grid-3") return stored;
-  } catch {
-    // storage unavailable — fall back to the default
-  }
-  return "grid-2";
-}
 
 interface BlockGridProps {
   pendingJobs?: PendingJob[];
@@ -107,10 +33,9 @@ export function BlockGrid({
   onJobResolved,
   refetchToken,
 }: BlockGridProps) {
-  const [blocks, setBlocks] = useState<LibraryBlockRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
-  const [viewMode, setViewMode] = useState<LibraryViewMode>(() => loadStoredViewMode());
+  const catalog = useBlockCatalog({ storageKey: VIEW_STORAGE_KEY });
+  const { blocks, setBlocks, loading, refetch, search, setSearch, visibleBlocks, viewMode, setViewMode } = catalog;
+
   const [generateOpen, setGenerateOpen] = useState(false);
   const [mutateBlockId, setMutateBlockId] = useState<string | null>(null);
   const [viewBlockId, setViewBlockId] = useState<string | null>(null);
@@ -119,19 +44,9 @@ export function BlockGrid({
   const [clearOpen, setClearOpen] = useState(false);
   const [dissectOpen, setDissectOpen] = useState(false);
 
-  const loadBlocks = useCallback(async () => {
-    setLoading(true);
-    const summaries = await listBlocks();
-    const details = await Promise.all(summaries.map((summary) => getBlock(summary.id)));
-    const nextBlocks = details.map(toLibraryBlock);
-    setBlocks(nextBlocks);
-    setLoading(false);
-    return nextBlocks;
-  }, []);
-
   useEffect(() => {
     let cancelled = false;
-    loadBlocks().then((nextBlocks) => {
+    refetch().then((nextBlocks) => {
       if (cancelled) return;
       for (const job of pendingJobs) {
         if (job.status === "resolving" && nextBlocks.some((block) => block.id === job.resultBlockId)) {
@@ -145,35 +60,7 @@ export function BlockGrid({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refetchToken]);
 
-  function selectViewMode(mode: LibraryViewMode) {
-    setViewMode(mode);
-    try {
-      localStorage.setItem(VIEW_STORAGE_KEY, mode);
-    } catch {
-      // storage unavailable — the choice just won't persist across visits
-    }
-  }
-
-  const sortedBlocks = useMemo(
-    () =>
-      [...blocks].sort((a, b) => {
-        const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
-        const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
-        return bTime - aTime;
-      }),
-    [blocks]
-  );
-
   const mutateBlock = mutateBlockId ? (blocks.find((block) => block.id === mutateBlockId) ?? null) : null;
-
-  const visibleBlocks = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    if (!term) return sortedBlocks;
-    return sortedBlocks.filter((block) => {
-      const haystack = [block.name, ...block.environment].join(" ").toLowerCase();
-      return haystack.includes(term);
-    });
-  }, [sortedBlocks, search]);
 
   async function handleTogglePreserve(block: LibraryBlockRecord) {
     const nextPreserved = !block.preserved;
@@ -209,80 +96,44 @@ export function BlockGrid({
     const response = await clearBlocks();
     if (!response.ok) return;
     const result: ClearBlocksResult = await response.json();
-    await loadBlocks();
+    await refetch();
     toast.success(`Cleared ${result.deleted} block(s), kept ${result.skipped_preserved} preserved.`);
   }
 
-  const gridClassName = cn(
-    viewMode === "list" && "flex flex-col gap-2",
-    viewMode === "grid-2" && "grid grid-cols-1 gap-3 sm:grid-cols-2",
-    viewMode === "grid-3" && "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
-  );
-
   return (
     <div className="flex flex-col gap-4 p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold">Library</h2>
-        <div className="flex items-center gap-3">
-          <div className="relative w-full max-w-xs">
-            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Search blocks"
-              aria-label="Search blocks"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              className="bg-background pl-8"
-            />
+      <BlockGridLayout
+        title={<h2 className="text-sm font-semibold">Library</h2>}
+        search={search}
+        onSearchChange={setSearch}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+        loading={loading}
+        loadingMessage="Loading library..."
+        actions={
+          <div className="flex items-center gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setDissectOpen(true)}
+              className="flex-1 justify-center gap-2.5 border-2 border-dashed border-primary/40 py-5 text-muted-foreground hover:border-primary/70 hover:text-primary"
+            >
+              <FileText className="size-4 text-primary" />
+              Populate the library from Google Docs
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setClearOpen(true)}
+              className="gap-2 border-2 border-destructive py-5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            >
+              <Trash2 className="size-4" />
+              Clear library
+            </Button>
           </div>
-          <div
-            className="flex items-center gap-0.5 rounded-2xl border bg-card p-1"
-            role="group"
-            aria-label="View mode"
-          >
-            {VIEW_MODES.map(({ value, label, icon: Icon }) => (
-              <Button
-                key={value}
-                type="button"
-                variant={viewMode === value ? "secondary" : "ghost"}
-                size="icon-sm"
-                aria-pressed={viewMode === value}
-                aria-label={label}
-                title={label}
-                onClick={() => selectViewMode(value)}
-              >
-                <Icon />
-              </Button>
-            ))}
-          </div>
-        </div>
-      </div>
-      <div className="flex items-center gap-3">
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => setDissectOpen(true)}
-          className="flex-1 justify-center gap-2.5 border-2 border-dashed border-primary/40 py-5 text-muted-foreground hover:border-primary/70 hover:text-primary"
-        >
-          <FileText className="size-4 text-primary" />
-          Populate the library from Google Docs
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => setClearOpen(true)}
-          className="gap-2 border-2 border-destructive py-5 text-destructive hover:bg-destructive/10 hover:text-destructive"
-        >
-          <Trash2 className="size-4" />
-          Clear library
-        </Button>
-      </div>
-      {loading ? (
-        <p className="flex items-center gap-2 text-muted-foreground">
-          <Spinner /> Loading library...
-        </p>
-      ) : (
-        <>
-          <div className={gridClassName}>
+        }
+        leading={
+          <>
             <button
               type="button"
               onClick={() => setGenerateOpen(true)}
@@ -295,34 +146,39 @@ export function BlockGrid({
               <Plus className={viewMode === "list" ? "size-5" : "size-6"} />
               Generate
             </button>
-            {pendingJobs.filter((job) => job.kind !== "dissect").map((job) => (
-              <PendingBlockTile
-                key={job.jobId}
-                job={job}
-                viewMode={viewMode}
-                onDismiss={(jobId) => onDismissJob?.(jobId)}
-              />
-            ))}
-            {visibleBlocks.map((block) => (
-              <BlockTile
-                key={block.id}
-                block={block}
-                viewMode={viewMode}
-                onView={() => setViewBlockId(block.id)}
-                onMutate={() => setMutateBlockId(block.id)}
-                onEdit={() => setEditBlockId(block.id)}
-                onTogglePreserve={() => handleTogglePreserve(block)}
-                onDelete={() => handleDeleteRequest(block.id)}
-              />
-            ))}
-          </div>
-          {visibleBlocks.length === 0 && pendingJobs.length === 0 && (
+            {pendingJobs
+              .filter((job) => job.kind !== "dissect")
+              .map((job) => (
+                <PendingBlockTile
+                  key={job.jobId}
+                  job={job}
+                  viewMode={viewMode}
+                  onDismiss={(jobId) => onDismissJob?.(jobId)}
+                />
+              ))}
+          </>
+        }
+        items={visibleBlocks}
+        getItemKey={(block) => block.id}
+        renderItem={(block, mode) => (
+          <BlockTile
+            block={block}
+            viewMode={mode}
+            onView={() => setViewBlockId(block.id)}
+            onMutate={() => setMutateBlockId(block.id)}
+            onEdit={() => setEditBlockId(block.id)}
+            onTogglePreserve={() => handleTogglePreserve(block)}
+            onDelete={() => handleDeleteRequest(block.id)}
+          />
+        )}
+        emptyMessage={
+          pendingJobs.length === 0 && (
             <p className="text-muted-foreground">
               {blocks.length === 0 ? "The library is empty." : "No blocks match your search."}
             </p>
-          )}
-        </>
-      )}
+          )
+        }
+      />
       <GenerateMutateDialog
         mode="generate"
         open={generateOpen}
@@ -361,7 +217,7 @@ export function BlockGrid({
             if (!next) setEditBlockId(null);
           }}
           onSaved={(updated) => {
-            const nextBlock = toLibraryBlock(updated);
+            const nextBlock = toBlockRecord(updated);
             setBlocks((prev) => prev.map((block) => (block.id === nextBlock.id ? nextBlock : block)));
           }}
         />

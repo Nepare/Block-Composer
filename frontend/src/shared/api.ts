@@ -20,3 +20,7 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
   }
   return response;
 }
+
+export function streamUrl(jobId: string): string {
+  return `/stream/${jobId}?key=${encodeURIComponent(session.get() ?? "")}`;
+}

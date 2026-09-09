@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ComposePane } from "@/features/compose/ComposePane";
+import { readStoredComposeJobId, useComposeJob } from "@/features/compose/useComposeJob";
 import { preserveBlock } from "@/features/library/api";
 import { LibraryPane } from "@/features/library/LibraryPane";
 import { readStoredJobs, useLibraryJobs, type DissectOutcome, type JobKind } from "@/features/library/useLibraryJobs";
@@ -30,6 +31,8 @@ function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>(readStoredActiveTab);
   const [notice, setNotice] = useState<string | undefined>();
   const [refetchToken, setRefetchToken] = useState(0);
+
+  const composeJob = useComposeJob();
 
   const libraryJobs = useLibraryJobs({
     onRefetchNeeded: () => setRefetchToken((token) => token + 1),
@@ -87,6 +90,12 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    const jobId = readStoredComposeJobId();
+    if (jobId) composeJob.reconnect(jobId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   if (sessionState === "checking") {
     return (
       <>
@@ -131,7 +140,7 @@ function App() {
           </TabsList>
         </header>
         <TabsContent value="compose" className="min-h-0 flex-1 overflow-y-auto">
-          <ComposePane />
+          <ComposePane composeJob={composeJob} />
         </TabsContent>
         <TabsContent value="library" className="min-h-0 flex-1 overflow-y-auto bg-muted">
           <LibraryPane libraryJobs={libraryJobs} refetchToken={refetchToken} />

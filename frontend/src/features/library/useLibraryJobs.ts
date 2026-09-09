@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { streamUrl } from "@/features/library/api";
+import { streamUrl } from "@/shared/api";
 
 export type JobKind = "generate" | "mutate" | "dissect";
 

@@ -1,5 +1,4 @@
 import { apiFetch } from "@/shared/api";
-import * as session from "@/shared/session";
 
 export interface BlockSummary {
   id: string;
@@ -128,8 +127,4 @@ export function startDissect(payload: DissectStartPayload): Promise<Response> {
 export async function getGoogleAuthStatus(): Promise<GoogleAuthStatus> {
   const response = await apiFetch("/auth/google/status");
   return response.json();
-}
-
-export function streamUrl(jobId: string): string {
-  return `/stream/${jobId}?key=${encodeURIComponent(session.get() ?? "")}`;
 }

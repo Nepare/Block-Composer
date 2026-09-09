@@ -40,13 +40,11 @@ their own, independent Google OAuth client — set up whichever one applies to y
    OPENROUTER_API_KEY=sk-or-v1-...
    ```
 
-That's it — the models this project defaults to the configured model, which by default cost $0 
-to call; the key just identifies you for OpenRouter's free-tier rate limits (20 requests/min, 
-50/day until you've ever spent $10 on the platform, then 1000/day). Free-tier `:free` models sit 
-behind a shared upstream pool and can occasionally return a transient 429 (rate-limited) or, less 
-often, get deprecated outright — if `config.yaml`'s configured model ever fails outright, check
-[openrouter.ai/models](https://openrouter.ai/models) (filter by price) for a current `:free`
-slug to swap in.
+That's it — the models this project defaults to the configured model; the key just identifies you 
+for OpenRouter. Remember: free-tier `:free` models sit behind a shared upstream pool and can 
+occasionally return a transient 429 (rate-limited) or, less often, get deprecated outright — 
+if `config.yaml`'s configured model ever fails outright, check [openrouter.ai/models](https://openrouter.ai/models) 
+(filter by price) for a current `:free` slug to swap in.
 
 ### 2. Ollama (optional, for the cheaper local tasks)
 
@@ -163,7 +161,9 @@ doesn't connect the other.
 A React + TypeScript SPA lives in `frontend/` (Vite, Tailwind CSS v4, shadcn/ui, bun-managed).
 It's served same-origin by the FastAPI app — no separate frontend host, no CORS config. On first
 visit, paste the shared `CVDOCS_API_KEY` secret into the login screen; it's validated against
-`GET /auth/check` and persisted in the browser so subsequent visits skip the prompt. 
+`GET /auth/check` and persisted in the browser so subsequent visits skip the prompt. The Library
+tab browses/generates/mutates/dissects blocks; the Compose tab drives a composition from a
+description to a finished result, with a history sidebar to revisit past ones.
 
 Local frontend development: `cd frontend && bun install && bun dev` (proxies to a separately
 running backend). Building it manually: `bun run build` (produces `frontend/dist`, served by the
@@ -216,44 +216,25 @@ cvdocs results clear                                   # delete every non-preser
 ```
 
 `-f`/`--criteria-file` (`generate`/`mutate`) and `-f`/`--request-file` (`compose`) read a
-UTF-8 `.txt`/`.md` file instead of an inline argument — useful for longer or multi-line
-text. Pass either the inline form or the file, never both.
+UTF-8 `.txt`/`.md` file instead of an inline argument. Pass either the inline form or the file.
 
 Every LLM-taking command accepts `--model provider:model-id` to override the configured
 default for that one call, e.g. `--model openrouter:z-ai/glm-5.3` or
 `--model ollama:qwen3:4b`.
 
 `--name` (`generate`/`mutate`/`compose`) skips that command's naming-model call and uses the
-given name instead; a collision with an existing library/results entry gets `_2`, `_3`, ...
-appended. `--preserve` marks the produced block/result as locked at creation time — a locked
-entry is exempt from `blocks clear`/`results clear`, though `blocks delete`/`results delete`
-can still remove it directly by design (a future frontend is expected to disable its own
-delete button for locked entries instead).
+given name instead; `--preserve` marks the produced block/result as protected at creation 
+time — a protected entry is exempt from `blocks clear`/`results clear`.
 
 `compose`'s `--restrict-generate` forbids the planner from producing any brand-new block;
-if the library as a whole can't supply enough blocks for the requested result, the command
-is rejected up front, before any work starts, naming the shortfall, and if the library has
-enough overall but compose's own candidate-narrowing window is configured too small to
-surface them, the window is widened automatically and a warning distinct from routine
-progress output is shown. It is rejected outright when combined with `--generate`, since the
-two directly contradict each other. `--restrict-mutate` forbids the planner from producing
-any edited variant of an existing block, so every existing block in the result appears
-exactly as originally authored; it has no equivalent feasibility check. The two flags are
+`--restrict-mutate` forbids the planner from producing any edited variant of an existing block, 
+so every existing block in the result appears exactly as originally authored The two flags are
 independent and may be combined, in which case the result is built entirely from existing
 blocks used exactly as-is.
 
 `compose`'s repeatable `--from-blocks <block-id>` restricts the planner's candidate pool to
-exactly the designated blocks — duplicates collapse silently, an unresolvable id rejects the
-whole call up front naming the offending id(s), and an empty set is rejected outright. Brand-new
-content is fully disabled for the call regardless of `--restrict-generate` (a harmless no-op
-alongside it), while mutation of a designated block stays available unless `--restrict-mutate` is
-also passed; designating a block makes it eligible, not mandatory. The feasibility check and
-narrowing-window widening described above apply
-unchanged, scoped to the designated set's size (its raw, unreduced distinct-block count) instead
-of the whole library's. Separately, and also on the plain no-`--from-blocks` path, whenever the
-eligible candidate pool already fits within what compose's own narrowing step would end up
-keeping, that narrowing analysis is skipped entirely and the whole pool goes straight to the
-planner unfiltered, with a status update noting the skip.
+exactly the designated blocks. Brand-new content is fully disabled for the call , while mutation 
+of a designated block stays available unless `--restrict-mutate` is also passed.
 
 ### HTTP
 
@@ -333,6 +314,9 @@ none of them return a `job_id` or involve `/stream`:
   Works on a preserved result too, same as `DELETE /blocks/{id}`.
 - `POST /results/{id}/preserve` / `POST /results/{id}/unpreserve` — lock/unlock a result; `404`
   if the id doesn't exist.
+- `POST /results/{id}/rename` — renames a saved result; `400` if the new name is blank/whitespace,
+  `404` if the id doesn't exist. Only the name changes — content, slots, and the id/on-disk
+  location are untouched.
 - `POST /results/clear` — deletes every non-preserved result; returns `{"deleted": N,
   "skipped_preserved": N}`.
 

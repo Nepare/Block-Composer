@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ConfirmDialog } from "@/features/library/ConfirmDialog";
+import { ConfirmDialog } from "@/shared/ui/ConfirmDialog";
 
 afterEach(() => {
   localStorage.clear();

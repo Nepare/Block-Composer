@@ -4,24 +4,11 @@ import type { PendingJob } from "@/features/library/useLibraryJobs";
 import { Button } from "@/shared/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import { cn } from "@/shared/lib/utils";
+import { originFromCreatedBy, type BlockViewMode, type LibraryBlockRecord } from "@/shared/blocks/types";
 
-export type LibraryViewMode = "list" | "grid-2" | "grid-3";
-
-export interface LibraryBlockRecord {
-  id: string;
-  name: string;
-  created_at: string | null;
-  created_by: string;
-  environment: string[];
-  preserved: boolean;
-}
-
-export function originFromCreatedBy(createdBy: string): BlockOrigin {
-  if (createdBy === "dissected" || createdBy === "mutated" || createdBy === "generated") {
-    return createdBy;
-  }
-  return "manual";
-}
+export type LibraryViewMode = BlockViewMode;
+export type { LibraryBlockRecord };
+export { originFromCreatedBy };
 
 interface BlockTileProps {
   block: LibraryBlockRecord;
