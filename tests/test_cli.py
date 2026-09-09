@@ -2,6 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from rich.console import Console
 from typer.testing import CliRunner
 
 import cli
@@ -15,6 +16,17 @@ from tools.compose import ComposeOutcome
 MOCK_TEMPLATES = Path(__file__).resolve().parent / "fixtures" / "templates.yaml"
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def _no_forced_color(monkeypatch):
+    """cli.console is a module-level Console() singleton whose color-system detection is
+    cached at construction time — a FORCE_COLOR/CLICOLOR_FORCE env var picked up back at
+    import time would survive any later per-test env change, so swap in a fresh no-color
+    Console rather than relying on env alone to keep ANSI codes out of result.output."""
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+    monkeypatch.delenv("CLICOLOR_FORCE", raising=False)
+    monkeypatch.setattr(cli, "console", Console(no_color=True))
 
 
 @pytest.fixture

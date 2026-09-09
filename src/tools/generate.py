@@ -86,9 +86,12 @@ def run_generate(
         body = client.chat(retry_messages, model, temperature=0.5, max_tokens=900, reasoning_effort="low")
         validate_block_shape(body)
 
+    body = body.strip()
+    if explicit_base is not None:
+        body = naming.apply_explicit_title(body, name)
     block = Block(
         id="",
-        body=body.strip(),
+        body=body,
         schema=schema,
         source="generated",
         created_by="generated",

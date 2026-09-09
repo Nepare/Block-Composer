@@ -241,7 +241,7 @@ def test_reasoning_effort_is_medium_for_planning_and_unset_for_naming_and_keywor
     assert client.calls[0]["reasoning_effort"] is None  # target-count detection (naming tier)
     assert client.calls[1]["reasoning_effort"] is None  # keyword extraction (keywords tier)
     assert client.calls[2]["reasoning_effort"] == "medium"  # the planning decision itself
-    assert client.calls[3]["reasoning_effort"] == "low"  # result naming (compose tier, but a pick, not a plan)
+    assert client.calls[3]["reasoning_effort"] is None  # result naming (naming tier)
 
 
 def test_target_count_detection_call_never_receives_compose_constraints(settings, fake_router, tmp_path):

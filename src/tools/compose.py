@@ -530,14 +530,17 @@ def run_compose(
 
 
 def _generate_result_name(content: str, settings: Settings, progress: ProgressSink) -> str:
-    """Names the composed result from its full content, via the compose model tier rather
-    than the cheap naming tier — summarizing a multi-block document needs more than the
-    naming model's usual short two-block comparison."""
-    client, model = get_client_and_model(settings.llm.models.compose, settings, on_progress=progress)
+    """Names the composed result from its full content, via the naming tier — its
+    reasoning-token suppression is already proven, unlike the compose tier's reasoning
+    model, which burned its whole budget on hidden reasoning and never emitted a name."""
+    client, model = get_client_and_model(settings.llm.models.naming, settings, on_progress=progress)
     compose_constraints = constraints_module.load(settings, "compose")
-    reply = client.chat(
-        result_name_prompt(content, compose_constraints), model, temperature=0.2, max_tokens=20, reasoning_effort="low"
-    )
+    try:
+        reply = client.chat(
+            result_name_prompt(content, compose_constraints), model, temperature=0.2, max_tokens=40
+        )
+    except LLMError:
+        return "result"
     lines = [line.strip() for line in reply.strip().splitlines() if line.strip()]
     name = lines[0].strip("[]").strip() if lines else ""
     if not name or len(name.split()) > 6:

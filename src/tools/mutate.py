@@ -76,6 +76,9 @@ def run_mutate(
         reply = client.chat(retry_messages, model, temperature=0.2, max_tokens=900, reasoning_effort="low")
         body, label = _parse_mutation_reply(reply)
 
+    if explicit_base is not None:
+        body = naming.apply_explicit_title(body, name)
+
     mutated = Block(
         id=original.id if in_place else "",
         body=body,

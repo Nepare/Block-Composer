@@ -38,6 +38,18 @@ def validate_explicit_name(name: str) -> str:
     return raw
 
 
+def apply_explicit_title(body: str, title: str) -> str:
+    """Rewrites (or inserts) a body's first Markdown heading to match a caller-supplied
+    title, so `Block.name` — always derived from that heading — reflects an explicit
+    --name/title instead of whatever heading the model generated."""
+    lines = body.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip().startswith("#"):
+            lines[i] = f"# {title}"
+            return "\n".join(lines)
+    return f"# {title}\n\n{body}"
+
+
 def unique_stem(base: str, exists: Callable[[str], bool]) -> str:
     if not exists(base):
         return base
