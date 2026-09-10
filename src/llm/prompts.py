@@ -8,6 +8,16 @@ def _with_constraints(system: str, constraints: str) -> str:
     return f"{system}\n\n## User constraints — follow these strictly\n{constraints}"
 
 
+def _excerpts_block(relevant_excerpts: list[str] | None) -> str:
+    if not relevant_excerpts:
+        return ""
+    bullets = "\n".join(f"- {e}" for e in relevant_excerpts)
+    return (
+        "\n\nGrounding — verbatim wording from the original request; apply only what concerns "
+        f"this entry:\n{bullets}"
+    )
+
+
 GENERATE_SYSTEM = (
     "You write one new entry for a small personal block library. Match the exact field "
     "shape (same style of heading/name, description, and labeled or bulleted fields) shown "
@@ -16,13 +26,19 @@ GENERATE_SYSTEM = (
 )
 
 
-def generate_prompt(criteria: str, style_examples: list[str], constraints: str = "") -> list[dict[str, str]]:
+def generate_prompt(
+    criteria: str,
+    style_examples: list[str],
+    constraints: str = "",
+    relevant_excerpts: list[str] | None = None,
+) -> list[dict[str, str]]:
     messages = [{"role": "system", "content": _with_constraints(GENERATE_SYSTEM, constraints)}]
     for example in style_examples:
         messages.append(
             {"role": "user", "content": f"Example entry for style/shape reference:\n{example}"}
         )
-    messages.append({"role": "user", "content": f"Write a new entry matching this: {criteria}"})
+    content = f"Write a new entry matching this: {criteria}" + _excerpts_block(relevant_excerpts)
+    messages.append({"role": "user", "content": content})
     return messages
 
 
@@ -49,10 +65,19 @@ MUTATE_SYSTEM = (
 )
 
 
-def mutate_prompt(original_body: str, criteria: str, constraints: str = "") -> list[dict[str, str]]:
+def mutate_prompt(
+    original_body: str,
+    criteria: str,
+    constraints: str = "",
+    relevant_excerpts: list[str] | None = None,
+) -> list[dict[str, str]]:
+    content = (
+        f"Original entry:\n{original_body}\n\nChange request: {criteria}"
+        + _excerpts_block(relevant_excerpts)
+    )
     return [
         {"role": "system", "content": _with_constraints(MUTATE_SYSTEM, constraints)},
-        {"role": "user", "content": f"Original entry:\n{original_body}\n\nChange request: {criteria}"},
+        {"role": "user", "content": content},
     ]
 
 
@@ -78,12 +103,14 @@ def _compose_system(allow_mutate: bool, allow_generate: bool) -> str:
                 "match; give a specific one-line change request\n"
             )
         example_steps.append(
-            f'{{"order": {len(example_steps) + 1}, "action": "mutate", "block_id": "...", "criteria": "..."}}'
+            f'{{"order": {len(example_steps) + 1}, "action": "mutate", "block_id": "...", '
+            '"criteria": "...", "relevant_excerpts": ["..."]}'
         )
     if allow_generate:
         system += "  - generate :: <criteria> — nothing in the catalog is even a partial fit\n"
         example_steps.append(
-            f'{{"order": {len(example_steps) + 1}, "action": "generate", "block_id": null, "criteria": "..."}}'
+            f'{{"order": {len(example_steps) + 1}, "action": "generate", "block_id": null, '
+            '"criteria": "...", "relevant_excerpts": ["..."]}'
         )
     steps_block = ",\n".join(f"    {step}" for step in example_steps)
     system += (
@@ -94,6 +121,27 @@ def _compose_system(allow_mutate: bool, allow_generate: bool) -> str:
         "request would otherwise need the same project, either mutate a different, still-unclaimed "
         "project instead, or generate, rather than claiming a project already used by an earlier "
         "step.\n\n"
+    )
+    if allow_mutate or allow_generate:
+        system += (
+            "For every mutate or generate step, first identify which specific part(s) of the request "
+            "concretely apply to that particular piece — don't let unrelated parts of the request bleed "
+            "into this step's criteria. When the relevant part of the request names a specific "
+            "technology, quantity, emphasis, or tone, your criteria for that step MUST carry that "
+            "specific detail forward explicitly, not fold it into a generic restatement. Never "
+            "reference or pull in another piece's content into this step's criteria — describe only "
+            "what this one step covers.\n\n"
+            "Example — request: \"a project showcasing backend work, ideally involving Kafka, plus two "
+            "more pieces.\" Too generic (WRONG) for that piece's criteria: \"a backend project\". "
+            "Correctly detailed (RIGHT): \"a backend project that uses Kafka\".\n\n"
+            "For mutate/generate steps, also include \"relevant_excerpts\": a list of zero or more "
+            "verbatim quotes copied exactly from the original request that support this step's "
+            "criteria — copy the exact wording, don't paraphrase. If the relevant detail is scattered "
+            "across more than one place in the request, include more than one excerpt. If nothing in "
+            "the request needs verbatim preservation for this piece, leave it as an empty list. Never "
+            "include text about a different piece.\n\n"
+        )
+    system += (
         "Also decide the final order the pieces should appear in, per the request's own "
         "ordering logic if it states one.\n\n"
         "Reply with ONLY a JSON object of this shape, nothing else:\n"

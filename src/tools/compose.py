@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
@@ -25,6 +25,7 @@ class ComposeSlot:
     block_id: str | None
     criteria: str | None
     resolved_id: str | None = None
+    relevant_excerpts: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -54,6 +55,24 @@ def _next_unused_candidate(candidates: list[Block], claimed_signatures: set[tupl
         if _tag_signature(block) not in claimed_signatures:
             return block
     return None
+
+
+def _normalize_for_match(text: str) -> str:
+    return " ".join(text.replace("‑", "-").split()).lower()
+
+
+def _verify_excerpts(excerpts: list[str], request: str) -> tuple[list[str], list[str]]:
+    """Confirms each excerpt is genuinely drawn from `request` rather than trusting the
+    planner's compliance alone -- case-insensitive, whitespace-collapsed substring match."""
+    normalized_request = _normalize_for_match(request)
+    valid: list[str] = []
+    invalid: list[str] = []
+    for excerpt in excerpts:
+        if _normalize_for_match(excerpt) in normalized_request:
+            valid.append(excerpt)
+        else:
+            invalid.append(excerpt)
+    return valid, invalid
 
 
 def _select_candidate_blocks(
@@ -175,6 +194,36 @@ def _plan_with_llm(
         allow_mutate=not restrict_mutate,
         allow_generate=not restrict_generate,
     )
+
+    def step_to_slot(step: dict, i: int) -> ComposeSlot:
+        order = int(step.get("order", i + 1))
+        action = step["action"]
+        block_id = step.get("block_id")
+        relevant_excerpts: list[str] = []
+        if action in ("mutate", "generate"):
+            raw_excerpts = step.get("relevant_excerpts") or []
+            if not isinstance(raw_excerpts, list) or not all(isinstance(e, str) for e in raw_excerpts):
+                raw_excerpts = []
+            relevant_excerpts, invalid_excerpts = _verify_excerpts(raw_excerpts, request)
+            for excerpt in invalid_excerpts:
+                progress(
+                    ProgressEvent(
+                        kind="warning",
+                        message=(
+                            f"Step {order} ({block_id or action}): planner excerpt wasn't found "
+                            f"verbatim in the original request, dropped: {excerpt!r}"
+                        ),
+                        block_id=block_id,
+                    )
+                )
+        return ComposeSlot(
+            order=order,
+            action=action,
+            block_id=block_id,
+            criteria=step.get("criteria"),
+            relevant_excerpts=relevant_excerpts,
+        )
+
     progress(ProgressEvent(kind="plan_start", message=f"Planning against {len(catalog)} block(s) in the library…"))
     plan_max_tokens = settings.behavior.compose.plan_max_tokens
     reply = client.chat(messages, model, temperature=0.3, max_tokens=plan_max_tokens, reasoning_effort="medium")
@@ -194,16 +243,7 @@ def _plan_with_llm(
         reply = client.chat(retry_messages, model, temperature=0.3, max_tokens=plan_max_tokens, reasoning_effort="medium")
         steps = _parse_plan_reply(reply)
 
-    slots = []
-    for i, step in enumerate(steps):
-        slots.append(
-            ComposeSlot(
-                order=int(step.get("order", i + 1)),
-                action=step["action"],
-                block_id=step.get("block_id"),
-                criteria=step.get("criteria"),
-            )
-        )
+    slots = [step_to_slot(step, i) for i, step in enumerate(steps)]
 
     count_mismatch = required_count is not None and len(slots) != required_count
     illegal_slots = [
@@ -236,15 +276,7 @@ def _plan_with_llm(
         retry_reply = client.chat(retry_messages, model, temperature=0.3, max_tokens=plan_max_tokens, reasoning_effort="medium")
         try:
             retry_steps = _parse_plan_reply(retry_reply)
-            slots = [
-                ComposeSlot(
-                    order=int(step.get("order", i + 1)),
-                    action=step["action"],
-                    block_id=step.get("block_id"),
-                    criteria=step.get("criteria"),
-                )
-                for i, step in enumerate(retry_steps)
-            ]
+            slots = [step_to_slot(step, i) for i, step in enumerate(retry_steps)]
         except LLMError:
             pass  # keep whatever `slots` already held from the last successfully-parsed attempt
 
@@ -433,10 +465,24 @@ def run_compose(
             message="Composition plan finalized.",
             data={
                 "steps": [
-                    {"order": s.order, "action": s.action, "block_id": s.block_id, "criteria": s.criteria}
+                    {
+                        "order": s.order,
+                        "action": s.action,
+                        "block_id": s.block_id,
+                        "criteria": s.criteria,
+                        "relevant_excerpts": s.relevant_excerpts,
+                    }
                     for s in sorted(all_slots, key=lambda s: s.order)
                 ]
-                + [{"order": len(all_slots) + 1, "action": "finalize", "block_id": None, "criteria": None}]
+                + [
+                    {
+                        "order": len(all_slots) + 1,
+                        "action": "finalize",
+                        "block_id": None,
+                        "criteria": None,
+                        "relevant_excerpts": [],
+                    }
+                ]
             },
         )
     )
@@ -485,6 +531,7 @@ def run_compose(
                     settings=settings,
                     on_progress=progress,
                     cancel_check=cancel_check,
+                    relevant_excerpts=slot.relevant_excerpts,
                 )
             except OperationCancelled:
                 progress(
@@ -519,6 +566,7 @@ def run_compose(
                     settings=settings,
                     on_progress=progress,
                     cancel_check=cancel_check,
+                    relevant_excerpts=slot.relevant_excerpts,
                 )
             except OperationCancelled:
                 progress(
@@ -624,6 +672,7 @@ def _save_result(
                 "block_id": s.block_id,
                 "criteria": s.criteria,
                 "resolved_id": s.resolved_id,
+                "relevant_excerpts": s.relevant_excerpts,
             }
             for s in slots
         ],

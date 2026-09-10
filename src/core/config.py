@@ -84,7 +84,7 @@ class ComposeConfig(BaseModel):
     keyword_search_unmatched_reserve: int = 2  # fixed, not proportional to top_n
     keywords_per_category_min: int = 0
     keywords_per_category_max: int = 10  # hard-truncates; min isn't enforced
-    plan_max_tokens: int = 4000  # completion-token cap for the compose planner LLM call
+    plan_max_tokens: int = 7000  # completion-token cap for the compose planner LLM call
 
 
 class MutateConfig(BaseModel):

@@ -39,6 +39,7 @@ def run_mutate(
     name: str | None = None,
     on_progress: ProgressSink | None = None,
     cancel_check: Callable[[], bool] | None = None,
+    relevant_excerpts: list[str] | None = None,
 ) -> tuple[Block, str]:
     """`on_progress`/`cancel_check` are optional and no-op by default, like compose.run_compose's."""
     progress = on_progress or (lambda _event: None)
@@ -50,7 +51,7 @@ def run_mutate(
 
     client, model = get_client_and_model(model_spec or settings.llm.models.mutate, settings, on_progress=progress)
     mutate_constraints = constraints_module.load(settings, "mutate")
-    messages = mutate_prompt(original.body, criteria, mutate_constraints)
+    messages = mutate_prompt(original.body, criteria, mutate_constraints, relevant_excerpts)
     progress(ProgressEvent(kind="mutate_start", message=f"Mutating {block_id}…", block_id=block_id))
     reply = client.chat(messages, model, temperature=0.2, max_tokens=settings.behavior.mutate.max_tokens, reasoning_effort="low")
     try:

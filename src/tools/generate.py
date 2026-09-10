@@ -52,6 +52,7 @@ def run_generate(
     model_spec: str | None = None,
     name: str | None = None,
     preserve: bool = False,
+    relevant_excerpts: list[str] | None = None,
     on_progress: ProgressSink | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> tuple[Block, NamingDecision, str | None]:
@@ -62,7 +63,7 @@ def run_generate(
     client, model = get_client_and_model(model_spec or settings.llm.models.generate, settings, on_progress=progress)
     examples = _pick_style_examples(schema, style_from, store, settings)
     generate_constraints = constraints_module.load(settings, "generate")
-    messages = generate_prompt(criteria, examples, generate_constraints)
+    messages = generate_prompt(criteria, examples, generate_constraints, relevant_excerpts)
 
     progress(ProgressEvent(kind="generate_start", message=f"Generating a {schema} block…"))
     body = client.chat(messages, model, temperature=0.5, max_tokens=settings.behavior.generate.max_tokens, reasoning_effort="low")

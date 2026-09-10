@@ -778,12 +778,24 @@ def test_plan_event_carries_structured_step_list_before_execution(settings, fake
     assert len(plan_events) == 1
     steps = plan_events[0].data["steps"]
     assert steps == [
-        {"order": 1, "action": "mutate", "block_id": "police_station", "criteria": "adapt"},
-        {"order": 2, "action": "generate", "block_id": None, "criteria": "a sawmill"},
-        {"order": 3, "action": "finalize", "block_id": None, "criteria": None},
+        {
+            "order": 1,
+            "action": "mutate",
+            "block_id": "police_station",
+            "criteria": "adapt",
+            "relevant_excerpts": [],
+        },
+        {
+            "order": 2,
+            "action": "generate",
+            "block_id": None,
+            "criteria": "a sawmill",
+            "relevant_excerpts": [],
+        },
+        {"order": 3, "action": "finalize", "block_id": None, "criteria": None, "relevant_excerpts": []},
     ]
     for step in steps:
-        assert set(step.keys()) == {"order", "action", "block_id", "criteria"}
+        assert set(step.keys()) == {"order", "action", "block_id", "criteria", "relevant_excerpts"}
         assert "resolved_id" not in step
 
     plan_done_index = next(i for i, e in enumerate(events) if e.kind == "plan_done")
@@ -808,7 +820,13 @@ def test_finalize_step_and_events_bracket_the_naming_and_save_work(settings, fak
 
     plan_event = next(e for e in events if e.kind == "plan")
     steps = plan_event.data["steps"]
-    assert steps[-1] == {"order": 2, "action": "finalize", "block_id": None, "criteria": None}
+    assert steps[-1] == {
+        "order": 2,
+        "action": "finalize",
+        "block_id": None,
+        "criteria": None,
+        "relevant_excerpts": [],
+    }
 
     finalize_start_index = next(i for i, e in enumerate(events) if e.kind == "finalize_start")
     naming_index = next(i for i, e in enumerate(events) if e.kind == "naming")
@@ -1240,6 +1258,255 @@ def test_hard_rejection_does_not_fire_when_count_fits_the_library(settings, fake
     )
 
     assert len(outcome.slots) == 3
+
+
+def test_long_detailed_criteria_reaches_mutate_and_generate_unchanged(settings, fake_router):
+    """T004: pass-through regression -- a long, detailed criteria string must reach
+    mutate.run_mutate/generate.run_generate byte-for-byte, no truncation/mangling."""
+    _seed_library(settings)
+    long_mutate_criteria = (
+        "Re-theme this station as a frontier sheriff's office serving a population of 4,200, "
+        "emphasizing horseback patrols, a single jail cell, and a telegraph line to the county "
+        "seat -- keep every field but rewrite each one to reflect the frontier setting specifically."
+    )
+    long_generate_criteria = (
+        "A riverside sawmill employing 30 workers, powered by a water wheel, producing lumber "
+        "for the town's ongoing construction boom -- mention the water wheel and the 30-worker "
+        "headcount explicitly."
+    )
+    plan = json.dumps(
+        {
+            "steps": [
+                {"order": 1, "action": "mutate", "block_id": "police_station", "criteria": long_mutate_criteria},
+                {"order": 2, "action": "generate", "block_id": None, "criteria": long_generate_criteria},
+            ]
+        }
+    )
+    mutate_reply = "===BODY===\n## Sheriff Station\n\nAdapted.\n\n**Rooms:**\n- Office\n===LABEL===\nsheriff"
+    generate_reply = "## Sawmill\n\nCuts logs.\n\n**Rooms:**\n- Saw room\n"
+    client = FakeLLMClient(replies=["NONE", plan, mutate_reply, generate_reply, "town_result"])
+    fake_router(compose_module, client)
+    fake_router(mutate_module, client)
+    fake_router(generate_module, client)
+
+    outcome = compose_module.run_compose("need law enforcement and lumber", settings=settings)
+
+    assert outcome.slots[0].criteria == long_mutate_criteria
+    assert outcome.slots[1].criteria == long_generate_criteria
+
+    mutate_call = next(c for c in client.calls if "Change request:" in c["messages"][-1]["content"])
+    assert long_mutate_criteria in mutate_call["messages"][-1]["content"]
+
+    generate_call = next(c for c in client.calls if "Write a new entry matching this:" in c["messages"][-1]["content"])
+    assert long_generate_criteria in generate_call["messages"][-1]["content"]
+
+
+def test_verify_excerpts_keeps_a_genuine_substring():
+    request = "Build a backend project that showcases Kafka experience."
+    excerpt = "backend project that showcases Kafka experience"
+
+    valid, invalid = compose_module._verify_excerpts([excerpt], request)
+
+    assert valid == [excerpt]
+    assert invalid == []
+
+
+def test_verify_excerpts_keeps_a_whitespace_reflowed_variant():
+    request = "Build a backend project that showcases Kafka experience."
+    reflowed = "backend  project\nthat showcases   Kafka\nexperience"
+
+    valid, invalid = compose_module._verify_excerpts([reflowed], request)
+
+    assert valid == [reflowed]
+    assert invalid == []
+
+
+def test_verify_excerpts_keeps_a_unicode_hyphen_variant():
+    # the request has a plain hyphen; the planner's excerpt substitutes a non-breaking one
+    request = "Looking for a full-stack engineer with cloud experience."
+    excerpt_with_nb_hyphen = "full‑stack engineer with cloud experience"
+
+    valid, invalid = compose_module._verify_excerpts([excerpt_with_nb_hyphen], request)
+
+    assert valid == [excerpt_with_nb_hyphen]
+    assert invalid == []
+
+
+def test_verify_excerpts_drops_text_not_present_in_the_request():
+    request = "Build a backend project that showcases Kafka experience."
+    fabricated = "a totally fabricated detail never mentioned"
+
+    valid, invalid = compose_module._verify_excerpts([fabricated], request)
+
+    assert valid == []
+    assert invalid == [fabricated]
+
+
+def test_verify_excerpts_keeps_multiple_non_adjacent_genuine_excerpts():
+    request = "Build a backend project using Kafka. Also add a frontend piece with React and Redux."
+    excerpts = ["backend project using Kafka", "frontend piece with React and Redux"]
+
+    valid, invalid = compose_module._verify_excerpts(excerpts, request)
+
+    assert valid == excerpts
+    assert invalid == []
+
+
+def test_verify_excerpts_empty_input_returns_empty_valid_and_invalid():
+    assert compose_module._verify_excerpts([], "any request text") == ([], [])
+
+
+def test_plan_with_llm_parses_relevant_excerpts_onto_slots(settings, fake_router):
+    store = _seed_library(settings)
+    request = (
+        "Build a backend project that showcases Kafka experience, adapt the police station, "
+        "and add a school."
+    )
+    plan = json.dumps(
+        {
+            "steps": [
+                {
+                    "order": 1,
+                    "action": "mutate",
+                    "block_id": "police_station",
+                    "criteria": "focus on Kafka backend",
+                    "relevant_excerpts": ["backend project that showcases Kafka experience"],
+                },
+                {"order": 2, "action": "use", "block_id": "school", "criteria": None},
+                {
+                    "order": 3,
+                    "action": "generate",
+                    "block_id": None,
+                    "criteria": "something new",
+                    "relevant_excerpts": ["a valid-looking excerpt", 42],
+                },
+            ]
+        }
+    )
+    client = FakeLLMClient(replies=[plan])
+    fake_router(compose_module, client)
+
+    slots = compose_module._plan_with_llm(request, store, settings, None, lambda _event: None)
+
+    ordered = sorted(slots, key=lambda s: s.order)
+    assert ordered[0].relevant_excerpts == ["backend project that showcases Kafka experience"]
+    assert ordered[1].relevant_excerpts == []  # "use" step -- field never parsed for it
+    assert ordered[2].relevant_excerpts == []  # malformed shape (contains a non-string) discarded
+
+
+def test_fabricated_excerpt_is_dropped_and_warned_about(settings, fake_router):
+    _seed_library(settings)
+    request = "Build a backend project that showcases Kafka experience for the police station."
+    genuine_excerpt = "backend project that showcases Kafka experience"
+    fabricated_excerpt = "a fabricated detail never in the request"
+    plan = json.dumps(
+        {
+            "steps": [
+                {
+                    "order": 1,
+                    "action": "mutate",
+                    "block_id": "police_station",
+                    "criteria": "focus on Kafka backend",
+                    "relevant_excerpts": [genuine_excerpt, fabricated_excerpt],
+                }
+            ]
+        }
+    )
+    mutate_reply = "===BODY===\n## Sheriff Station\n\nAdapted.\n\n**Rooms:**\n- Office\n===LABEL===\nsheriff"
+    client = FakeLLMClient(replies=["NONE", plan, mutate_reply, "town_result"])
+    fake_router(compose_module, client)
+    fake_router(mutate_module, client)
+
+    events: list[ProgressEvent] = []
+    outcome = compose_module.run_compose(request, settings=settings, on_progress=events.append)
+
+    assert outcome.slots[0].relevant_excerpts == [genuine_excerpt]
+    warnings = [e for e in events if e.kind == "warning"]
+    assert len(warnings) == 1
+    assert "police_station" in warnings[0].message
+    assert fabricated_excerpt in warnings[0].message
+    assert warnings[0].block_id == "police_station"
+
+
+def test_persisted_result_slots_include_relevant_excerpts(settings, fake_router):
+    _seed_library(settings)
+    request = "Adapt the police station to focus on Kafka backend work."
+    excerpt = "focus on Kafka backend work"
+    plan = json.dumps(
+        {
+            "steps": [
+                {
+                    "order": 1,
+                    "action": "mutate",
+                    "block_id": "police_station",
+                    "criteria": "focus on Kafka backend",
+                    "relevant_excerpts": [excerpt],
+                }
+            ]
+        }
+    )
+    mutate_reply = "===BODY===\n## Sheriff Station\n\nAdapted.\n\n**Rooms:**\n- Office\n===LABEL===\nsheriff"
+    client = FakeLLMClient(replies=["NONE", plan, mutate_reply, "result_name"])
+    fake_router(compose_module, client)
+    fake_router(mutate_module, client)
+
+    outcome = compose_module.run_compose(request, settings=settings)
+
+    from storage.filesystem import FilesystemResultStorage
+
+    saved = FilesystemResultStorage(settings.path.results_dir).load(outcome.result_id)
+    for slot_dict in saved.slots:
+        assert "relevant_excerpts" in slot_dict
+    assert saved.slots[0]["relevant_excerpts"] == [excerpt]
+
+
+def test_relevant_excerpts_reach_mutate_and_generate_calls(settings, fake_router):
+    """T010: run_compose's slot-execution loop must thread a slot's relevant_excerpts into
+    mutate.run_mutate/generate.run_generate, which in turn must forward them to
+    mutate_prompt/generate_prompt so the excerpt text is appended to the LLM message. EXPECTED
+    TO FAIL until T019 (threading relevant_excerpts through run_compose's execution loop, plus
+    the run_mutate/run_generate parameter itself) lands -- not this feature's task."""
+    _seed_library(settings)
+    request = (
+        "Adapt the police station to focus on Kafka backend work, and generate a sawmill "
+        "that uses a water wheel."
+    )
+    excerpt_mutate = "focus on Kafka backend work"
+    excerpt_generate = "a sawmill that uses a water wheel"
+    plan = json.dumps(
+        {
+            "steps": [
+                {
+                    "order": 1,
+                    "action": "mutate",
+                    "block_id": "police_station",
+                    "criteria": "focus on Kafka backend",
+                    "relevant_excerpts": [excerpt_mutate],
+                },
+                {
+                    "order": 2,
+                    "action": "generate",
+                    "block_id": None,
+                    "criteria": "a sawmill",
+                    "relevant_excerpts": [excerpt_generate],
+                },
+            ]
+        }
+    )
+    mutate_reply = "===BODY===\n## Sheriff Station\n\nAdapted.\n\n**Rooms:**\n- Office\n===LABEL===\nsheriff"
+    generate_reply = "## Sawmill\n\nCuts logs.\n\n**Rooms:**\n- Saw room\n"
+    client = FakeLLMClient(replies=["NONE", plan, mutate_reply, generate_reply, "town_result"])
+    fake_router(compose_module, client)
+    fake_router(mutate_module, client)
+    fake_router(generate_module, client)
+
+    compose_module.run_compose(request, settings=settings)
+
+    mutate_call = next(c for c in client.calls if "Change request:" in c["messages"][-1]["content"])
+    generate_call = next(c for c in client.calls if "Write a new entry matching this:" in c["messages"][-1]["content"])
+
+    assert excerpt_mutate in mutate_call["messages"][-1]["content"]
+    assert excerpt_generate in generate_call["messages"][-1]["content"]
 
 
 def test_warning_widens_narrowing_window_when_configured_top_n_is_too_small(settings, fake_router):

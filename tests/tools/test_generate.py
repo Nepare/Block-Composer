@@ -201,3 +201,33 @@ def test_run_generate_with_degenerate_name_raises_before_any_llm_call(settings, 
         generate_module.run_generate("a widget", settings=settings, name="!!!")
 
     assert client.call_count == 0
+
+
+def test_run_generate_forwards_relevant_excerpts_to_initial_and_retry_calls(settings, fake_router):
+    client = FakeLLMClient(
+        replies=[
+            "no heading, no fields",
+            "## Sheriff Outpost\n\nA frontier outpost.\n\n**Role:** nobody\n",
+        ]
+    )
+    fake_router(generate_module, client)
+
+    generate_module.run_generate(
+        "a sheriff outpost", settings=settings, relevant_excerpts=["verbatim quote from the request"]
+    )
+
+    assert client.call_count == 2
+    for call in client.calls:
+        combined = " ".join(m["content"] for m in call["messages"])
+        assert "verbatim quote from the request" in combined
+        assert "Grounding" in combined
+
+
+def test_run_generate_without_relevant_excerpts_omits_grounding_block(settings, fake_router):
+    client = FakeLLMClient(replies=["## Sheriff Outpost\n\nA frontier outpost.\n\n**Role:** nobody\n"])
+    fake_router(generate_module, client)
+
+    generate_module.run_generate("a sheriff outpost", settings=settings)
+
+    combined = " ".join(m["content"] for m in client.calls[0]["messages"])
+    assert "Grounding" not in combined

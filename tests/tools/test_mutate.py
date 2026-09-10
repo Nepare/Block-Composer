@@ -241,6 +241,45 @@ def test_run_mutate_degenerate_name_raises_before_the_llm_is_called(settings, fa
     assert client.call_count == 0
 
 
+def test_run_mutate_forwards_relevant_excerpts_to_both_initial_and_retry_calls(settings, fake_router):
+    _seed(settings)
+    client = FakeLLMClient(
+        replies=[
+            "not in the required format at all",
+            "===BODY===\n## Police Station\n\nFixed.\n\n**Rooms:**\n- Office\n===LABEL===\nsheriff",
+        ]
+    )
+    fake_router(mutate_module, client)
+
+    mutate_module.run_mutate(
+        "police_station",
+        "fix",
+        settings=settings,
+        relevant_excerpts=["must keep the sheriff angle"],
+    )
+
+    assert client.call_count == 2
+    # initial call: excerpts land in the final user message
+    assert "Grounding" in client.calls[0]["messages"][-1]["content"]
+    assert "must keep the sheriff angle" in client.calls[0]["messages"][-1]["content"]
+    # retry call: built by appending onto the initial `messages`, which already carries the excerpts
+    assert any(
+        "Grounding" in m["content"] and "must keep the sheriff angle" in m["content"]
+        for m in client.calls[1]["messages"]
+    )
+
+
+def test_run_mutate_omitting_relevant_excerpts_has_no_grounding_block(settings, fake_router):
+    _seed(settings)
+    reply = "===BODY===\n## Police Station\n\nSheriff-run now.\n\n**Rooms:**\n- Office\n===LABEL===\nsheriff"
+    client = FakeLLMClient(replies=[reply])
+    fake_router(mutate_module, client)
+
+    mutate_module.run_mutate("police_station", "re-theme", settings=settings)
+
+    assert "Grounding" not in client.calls[0]["messages"][-1]["content"]
+
+
 def test_run_mutate_includes_constraints_file_in_the_system_prompt(settings, fake_router, tmp_path):
     _seed(settings)
     constraints_file = tmp_path / "MUTATE_CONSTRAINTS.md"
