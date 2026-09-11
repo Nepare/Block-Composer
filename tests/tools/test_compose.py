@@ -589,6 +589,107 @@ def test_ordinary_request_with_no_lexical_overlap_leaves_candidates_unchanged(se
     assert [b.id for b in candidates] == [b.id for b in expected]
 
 
+def test_select_candidate_blocks_dedupes_multi_variant_project_from_force_include(settings, fake_router):
+    """T009: a project with several stored variants must occupy exactly one force-included
+    candidate slot, while other, distinct named projects remain individually reachable."""
+    from fakes import FakeBlockStorage
+
+    settings.behavior.compose.keyword_search_top_n = 1  # forces narrowing, not skip
+    store = FakeBlockStorage()
+    store.save(
+        Block(
+            id="",
+            body="## Conferencing Software Solution\n\nVideo calls.\n",
+            tags=["conferencing_software_solution"],
+        ),
+        filename_stem="conferencing_software_solution",
+    )
+    for suffix in ("mut_a", "mut_b", "mut_c"):
+        store.save(
+            Block(
+                id="",
+                body=f"## Conferencing Variant {suffix}\n\nAdapted.\n",
+                tags=["conferencing_software_solution"],
+            ),
+            filename_stem=f"conferencing_software_solution_{suffix}",
+        )
+    store.save(
+        Block(id="", body="## Restaurant Inventory\n\nTracks stock.\n"),
+        filename_stem="restaurant_inventory_management",
+    )
+    store.save(
+        Block(id="", body="## Veterinary Clinic\n\nTreats pets.\n"),
+        filename_stem="veterinary_clinic_management",
+    )
+
+    # non-empty but generic categories that match none of these blocks' own fields -- keeps
+    # keywords.is_empty() False (so narrowing doesn't fall back to the unfiltered pool) while
+    # leaving lexical force-include as the only thing that can recover any of these blocks
+    keywords_reply = "ROLE: manager\nENVIRONMENT: office\nRESPONSIBILITIES: coordination\nDOMAIN: general\n"
+    client = FakeLLMClient(replies=[keywords_reply])
+    fake_router(compose_module, client)
+
+    request = (
+        "Need pieces for the conferencing software solution project, the restaurant "
+        "inventory management project, and the veterinary clinic management project."
+    )
+    candidates = compose_module._select_candidate_blocks(request, store, settings, lambda _event: None)
+
+    candidate_ids = {b.id for b in candidates}
+    family_ids = {
+        "conferencing_software_solution",
+        "conferencing_software_solution_mut_a",
+        "conferencing_software_solution_mut_b",
+        "conferencing_software_solution_mut_c",
+    }
+    assert len(candidate_ids & family_ids) == 1
+    assert "conferencing_software_solution" in candidate_ids  # canonical, not a "_mut" variant
+    assert "restaurant_inventory_management" in candidate_ids
+    assert "veterinary_clinic_management" in candidate_ids
+
+
+def test_select_candidate_blocks_unchanged_when_no_duplicate_force_included_variants(settings, fake_router):
+    """T013: regression -- when lexical_matches returns no same-project duplicates (the
+    common case), _select_candidate_blocks's output is unaffected by the dedup step."""
+    from fakes import FakeBlockStorage
+    from tools.retrieval import CategorizedKeywords, lexical_matches, rank_blocks
+
+    settings.behavior.compose.keyword_search_top_n = 1  # forces narrowing, not skip
+    store = FakeBlockStorage()
+    store.save(
+        Block(id="", body="## ERP/PDM System\n\nHandles product data.\n\n**Environment:** SAP\n"),
+        filename_stem="erp_pdm_system",
+    )
+    for stem in ("aaa_block", "bbb_block", "ccc_block", "ddd_block"):
+        store.save(
+            Block(id="", body=f"## {stem}\n\nGeneric entry.\n\n**Environment:** Jira\n"),
+            filename_stem=stem,
+        )
+
+    keywords_reply = "ROLE: manager\nENVIRONMENT: office\nRESPONSIBILITIES: coordination\nDOMAIN: general\n"
+    client = FakeLLMClient(replies=[keywords_reply])
+    fake_router(compose_module, client)
+
+    request = "Update the ERP/PDM system entry to also mention X"
+    candidates = compose_module._select_candidate_blocks(request, store, settings, lambda _event: None)
+
+    blocks = store.all()
+    expected_forced = lexical_matches(
+        blocks,
+        request,
+        min_overlap=settings.behavior.compose.named_reference_min_overlap,
+        rare_df_max=settings.behavior.compose.named_reference_rare_project_df_max,
+    )
+    expected = rank_blocks(
+        blocks,
+        CategorizedKeywords(role=["manager"], environment=["office"], responsibilities=["coordination"], domain=["general"]),
+        top_n=settings.behavior.compose.keyword_search_top_n,
+        unmatched_reserve=settings.behavior.compose.keyword_search_unmatched_reserve,
+        force_include=expected_forced,  # no duplicates present here, so dedup is a no-op
+    )
+    assert [b.id for b in candidates] == [b.id for b in expected]
+
+
 def test_compose_works_against_fake_block_and_result_storage(settings, fake_router, fake_storage):
     """Proves the BlockStorage/ResultStorage Protocols are complete: run_compose works
     unmodified against in-memory fakes, not just the filesystem implementations."""

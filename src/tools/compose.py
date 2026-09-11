@@ -13,7 +13,13 @@ from core.json_extraction import iter_json_objects
 from llm.prompts import compose_prompt, result_name_prompt
 from llm.router import get_client_and_model
 from core.progress import ProgressEvent, ProgressSink
-from tools.retrieval import extract_retrieval_signals, extract_target_count, lexical_matches, rank_blocks
+from tools.retrieval import (
+    dedupe_blocks_by_project,
+    extract_retrieval_signals,
+    extract_target_count,
+    lexical_matches,
+    rank_blocks,
+)
 from storage.base import BlockStorage, Result
 from storage.router import get_block_storage, get_result_storage
 
@@ -138,17 +144,20 @@ def _select_candidate_blocks(
         )
         top_n = required_count
         unmatched_reserve = required_count
+    forced = lexical_matches(
+        blocks,
+        request,
+        min_overlap=settings.behavior.compose.named_reference_min_overlap,
+        rare_df_max=settings.behavior.compose.named_reference_rare_project_df_max,
+    )
+    # collapses a project's own force-included sibling variants, never a distinct project
+    forced = dedupe_blocks_by_project(forced)
     narrowed = rank_blocks(
         blocks,
         keywords,
         top_n=top_n,
         unmatched_reserve=unmatched_reserve,
-        force_include=lexical_matches(
-            blocks,
-            request,
-            min_overlap=settings.behavior.compose.named_reference_min_overlap,
-            rare_df_max=settings.behavior.compose.named_reference_rare_project_df_max,
-        ),
+        force_include=forced,
     )
     progress(
         ProgressEvent(

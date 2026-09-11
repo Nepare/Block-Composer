@@ -2,6 +2,10 @@ from models.blocks import Block
 from fakes import FakeLLMClient
 from tools.retrieval import (
     CategorizedKeywords,
+    ScoredBlock,
+    _dedupe_by_project,
+    _pick_representative_block,
+    dedupe_blocks_by_project,
     extract_retrieval_signals,
     extract_target_count,
     rank_blocks,
@@ -463,3 +467,106 @@ def test_rank_blocks_force_include_none_or_empty_matches_omitting_the_parameter(
 
     assert [b.id for b in with_none] == [b.id for b in without_param]
     assert [b.id for b in with_empty] == [b.id for b in without_param]
+
+
+# --- T005: _pick_representative_block / _dedupe_by_project / dedupe_blocks_by_project ------
+
+
+def test_pick_representative_block_prefers_canonical_regardless_of_input_order():
+    canonical, mut_a, mut_b, mut_c = _conferencing_family_blocks()
+
+    for group in (
+        [canonical, mut_a, mut_b, mut_c],
+        [mut_a, mut_b, mut_c, canonical],
+        [mut_c, canonical, mut_a, mut_b],
+        [mut_b, mut_a, canonical, mut_c],
+    ):
+        assert _pick_representative_block(group).id == canonical.id
+
+
+def test_pick_representative_block_falls_back_to_first_member_when_none_is_canonical():
+    # no unsuffixed original stored for this project -- every member is itself a "_mut"
+    # variant, so the deterministic fallback is whichever comes first in the input order
+    _, mut_a, mut_b, mut_c = _conferencing_family_blocks()
+
+    assert _pick_representative_block([mut_a, mut_b, mut_c]).id == mut_a.id
+    assert _pick_representative_block([mut_c, mut_b, mut_a]).id == mut_c.id
+
+
+def test_dedupe_blocks_by_project_collapses_variants_keeps_singletons_and_order():
+    canonical, mut_a, mut_b, mut_c = _conferencing_family_blocks()
+    singleton_a, singleton_b = _unrelated_singleton_blocks()
+    # family members scattered and out of canonical-first order, interleaved with singletons
+    blocks = [mut_a, singleton_a, mut_b, singleton_b, canonical, mut_c]
+
+    result = dedupe_blocks_by_project(blocks)
+
+    assert [b.id for b in result] == [canonical.id, singleton_a.id, singleton_b.id]
+
+
+def test_dedupe_blocks_by_project_empty_list_returns_empty_list():
+    assert dedupe_blocks_by_project([]) == []
+
+
+def test_dedupe_by_project_scored_form_mirrors_the_plain_block_form():
+    keywords = CategorizedKeywords()
+    canonical, mut_a, mut_b, mut_c = _conferencing_family_blocks()
+    singleton_a, singleton_b = _unrelated_singleton_blocks()
+    scored = [
+        score_block(b, keywords)
+        for b in [mut_a, singleton_a, mut_b, singleton_b, canonical, mut_c]
+    ]
+
+    result = _dedupe_by_project(scored)
+
+    assert [s.block.id for s in result] == [canonical.id, singleton_a.id, singleton_b.id]
+    assert all(isinstance(s, ScoredBlock) for s in result)
+
+
+# --- T008: rank_blocks dedup coverage ---------------------------------------------
+
+
+def test_rank_blocks_dedup_prevents_variants_from_crowding_out_a_distinct_project():
+    keywords = CategorizedKeywords(domain=["conferencing", "robotics"])
+    family = _conferencing_family_blocks()  # 4 variants, one tag_signature
+    robotics = Block(id="robotic_irrigation_system", body="## Robotic Irrigation\n", tags=["robotics_project"])
+
+    # without dedup, a top_n=2 slice of 6 equally-scored blocks (stable sort) would grab two
+    # of the same conferencing family instead of the family plus the distinct robotics project
+    ranked = rank_blocks(family + [robotics], keywords, top_n=2, unmatched_reserve=0)
+
+    assert len(ranked) == 2
+    ranked_ids = {b.id for b in ranked}
+    family_ids = {b.id for b in family}
+    assert len(ranked_ids & family_ids) == 1
+    assert "conferencing_software_solution" in ranked_ids  # canonical, not a "_mut" variant
+    assert "robotic_irrigation_system" in ranked_ids
+
+
+def test_rank_blocks_dedup_applies_to_the_unmatched_reserve_pool_too():
+    keywords = CategorizedKeywords(domain=["nothing_matches_this"])
+    family = _conferencing_family_blocks()  # all score 0 -- land in the unmatched pool
+    other = Block(id="zzz_singleton", body="## ZZZ\n\nUnrelated.\n")
+
+    ranked = rank_blocks(family + [other], keywords, top_n=0, unmatched_reserve=2)
+
+    assert len(ranked) == 2
+    ranked_ids = {b.id for b in ranked}
+    family_ids = {b.id for b in family}
+    assert len(ranked_ids & family_ids) == 1
+    assert "zzz_singleton" in ranked_ids
+
+
+# --- T012: regression -- unchanged when no same-project duplicates are present ----
+
+
+def test_rank_blocks_unchanged_when_no_same_project_duplicates_present():
+    keywords = CategorizedKeywords(environment=["Jira"])
+    strong = Block(id="strong", body="## A\n\n**Environment:** Jira\n")
+    mid = Block(id="mid", body="## B\n\n**Environment:** Jira\n")  # ties strong's score
+    unmatched = [Block(id=f"u{i}", body=f"## U{i}\n\nNo overlap.\n") for i in range(3)]
+
+    ranked = rank_blocks([mid, strong] + unmatched, keywords, top_n=5, unmatched_reserve=2)
+
+    # stable score-sort keeps input order on ties; unmatched reserve takes the first 2 by id
+    assert [b.id for b in ranked] == ["mid", "strong", "u0", "u1"]

@@ -229,6 +229,43 @@ def score_block(
     return ScoredBlock(block=block, score=score, matched=matched)
 
 
+def _pick_representative_block(group: list[Block]) -> Block:
+    """Prefers a non-"_mut"-suffixed member over an adapted variant, falling back to the first member."""
+    non_variants = [
+        b for b in group if not any(other is not b and b.id.startswith(other.id + "_mut") for other in group)
+    ]
+    return non_variants[0] if non_variants else group[0]
+
+
+def _dedupe_by_project(scored: list[ScoredBlock]) -> list[ScoredBlock]:
+    """Keeps one representative ScoredBlock per tag_signature group, in first-seen order."""
+    groups: dict[tuple[str, ...], list[ScoredBlock]] = {}
+    order: list[tuple[str, ...]] = []
+    for s in scored:
+        sig = s.block.tag_signature
+        if sig not in groups:
+            groups[sig] = []
+            order.append(sig)
+        groups[sig].append(s)
+    return [
+        next(s for s in groups[sig] if s.block is _pick_representative_block([g.block for g in groups[sig]]))
+        for sig in order
+    ]
+
+
+def dedupe_blocks_by_project(blocks: list[Block]) -> list[Block]:
+    """Same rule as _dedupe_by_project, for a plain Block list with no ScoredBlock wrapper."""
+    groups: dict[tuple[str, ...], list[Block]] = {}
+    order: list[tuple[str, ...]] = []
+    for b in blocks:
+        sig = b.tag_signature
+        if sig not in groups:
+            groups[sig] = []
+            order.append(sig)
+        groups[sig].append(b)
+    return [_pick_representative_block(groups[sig]) for sig in order]
+
+
 def rank_blocks(
     blocks: list[Block],
     keywords: CategorizedKeywords,
@@ -243,6 +280,10 @@ def rank_blocks(
     scored = [score_block(b, keywords, keyword_weight=keyword_weight) for b in blocks]
     matched_sorted = sorted((s for s in scored if s.score > 0), key=lambda s: s.score, reverse=True)
     unmatched_sorted = sorted((s for s in scored if s.score == 0), key=lambda s: s.block.id)
+
+    # force_include is deduped by the caller, not here, so a forced target is never at risk
+    matched_sorted = _dedupe_by_project(matched_sorted)
+    unmatched_sorted = _dedupe_by_project(unmatched_sorted)
 
     reserve = min(unmatched_reserve, len(unmatched_sorted))
     top_matched = matched_sorted[:top_n]
