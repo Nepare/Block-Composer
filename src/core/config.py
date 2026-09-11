@@ -85,6 +85,8 @@ class ComposeConfig(BaseModel):
     keywords_per_category_min: int = 0
     keywords_per_category_max: int = 10  # hard-truncates; min isn't enforced
     plan_max_tokens: int = 7000  # completion-token cap for the compose planner LLM call
+    named_reference_min_overlap: int = 2
+    named_reference_rare_project_df_max: int = 3
 
 
 class MutateConfig(BaseModel):

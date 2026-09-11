@@ -525,6 +525,70 @@ def test_degenerate_keyword_reply_falls_back_to_the_full_catalog(settings, fake_
     assert "Planning against 5 block(s)" in joined  # fell back to the full, unnarrowed catalog
 
 
+def test_named_project_reference_recovers_block_missed_by_keyword_scoring(settings, fake_router):
+    """Regression coverage for spec 020's blind spot: keyword extraction paraphrasing away a
+    literal/near-literal project reference must not drop that project's block from
+    _select_candidate_blocks's output once lexical force-include is wired in."""
+    from fakes import FakeBlockStorage
+
+    settings.behavior.compose.keyword_search_top_n = 1  # forces narrowing, not skip
+    store = FakeBlockStorage()
+    store.save(
+        Block(id="", body="## ERP/PDM System\n\nHandles product data.\n\n**Environment:** SAP\n"),
+        filename_stem="erp_pdm_system",
+    )
+    for stem in ("aaa_block", "bbb_block", "ccc_block", "ddd_block"):
+        store.save(
+            Block(id="", body=f"## {stem}\n\nGeneric entry.\n\n**Environment:** Jira\n"),
+            filename_stem=stem,
+        )
+
+    # generic categories that don't match the target block's own fields at all -- simulates
+    # keyword extraction paraphrasing away the literal "ERP/PDM" reference
+    keywords_reply = "ROLE: manager\nENVIRONMENT: office\nRESPONSIBILITIES: coordination\nDOMAIN: general\n"
+    client = FakeLLMClient(replies=[keywords_reply])
+    fake_router(compose_module, client)
+
+    candidates = compose_module._select_candidate_blocks(
+        "Update the ERP/PDM system entry to also mention X", store, settings, lambda _event: None
+    )
+
+    assert "erp_pdm_system" in {b.id for b in candidates}
+
+
+def test_ordinary_request_with_no_lexical_overlap_leaves_candidates_unchanged(settings, fake_router):
+    """Regression coverage for spec FR-004/SC-002: an ordinary request that doesn't name any
+    specific project must produce exactly what keyword-scoring narrowing alone would -- the
+    lexical force-include path must not add or remove a single candidate here."""
+    from fakes import FakeBlockStorage
+    from tools.retrieval import CategorizedKeywords, rank_blocks
+
+    settings.behavior.compose.keyword_search_top_n = 2  # forces narrowing, not skip
+    store = FakeBlockStorage()
+    for i in range(6):
+        store.save(
+            Block(id="", body=f"## Block {i}\n\nGeneric entry {i}.\n\n**Environment:** Jira\n"),
+            filename_stem=f"block_{i}",
+        )
+    blocks = store.all()
+
+    keywords_reply = "ROLE: \nENVIRONMENT: Jira\nRESPONSIBILITIES: \nDOMAIN: \n"
+    client = FakeLLMClient(replies=[keywords_reply])
+    fake_router(compose_module, client)
+
+    candidates = compose_module._select_candidate_blocks(
+        "need something ordinary for a small team", store, settings, lambda _event: None
+    )
+
+    expected = rank_blocks(
+        blocks,
+        CategorizedKeywords(environment=["Jira"]),
+        top_n=settings.behavior.compose.keyword_search_top_n,
+        unmatched_reserve=settings.behavior.compose.keyword_search_unmatched_reserve,
+    )
+    assert [b.id for b in candidates] == [b.id for b in expected]
+
+
 def test_compose_works_against_fake_block_and_result_storage(settings, fake_router, fake_storage):
     """Proves the BlockStorage/ResultStorage Protocols are complete: run_compose works
     unmodified against in-memory fakes, not just the filesystem implementations."""

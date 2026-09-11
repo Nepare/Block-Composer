@@ -18,6 +18,21 @@ _CATEGORY_LABELS = {
 
 _WEIGHTS = {"role": 1.5, "environment": 1.5, "responsibilities": 1.0, "domain": 1.0}
 
+_LEXICAL_STOPWORDS = {
+    "a", "an", "the", "for", "of", "and", "or", "to", "in", "on", "with", "also", "system",
+    "systems", "platform", "project", "device", "application", "app", "service", "software",
+    "entry", "update", "mention", "add", "please", "my", "about", "that", "this", "into",
+    "based", "solution", "tool", "development",
+}
+
+_LEXICAL_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+def _lexical_tokens(text: str) -> set[str]:
+    """Lowercase alphanumeric word tokens, length > 2, generic stopwords removed."""
+    tokens = _LEXICAL_TOKEN_RE.findall(text.lower())
+    return {t for t in tokens if len(t) > 2 and t not in _LEXICAL_STOPWORDS}
+
 _NUMBER_WORDS = {
     1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven",
     8: "eight", 9: "nine", 10: "ten", 11: "eleven", 12: "twelve", 13: "thirteen",
@@ -115,6 +130,54 @@ def extract_target_count(request: str, client: LLMClient, model: str) -> int | N
     return count
 
 
+def _block_lexical_tokens(block: Block) -> set[str]:
+    """Union of lexical tokens from the block's id, tags, and name."""
+    normalized_id = block.id.replace("_", " ").replace("-", " ")
+    tokens = set(_lexical_tokens(normalized_id))
+    for tag in block.tags:
+        normalized_tag = tag.replace("_", " ").replace("-", " ")
+        tokens |= _lexical_tokens(normalized_tag)
+    tokens |= _lexical_tokens(block.name)
+    return tokens
+
+
+def _project_lexical_token_sets(blocks: list[Block]) -> dict[tuple[str, ...], set[str]]:
+    """Groups blocks by tag_signature, unioning each project's own variants' lexical tokens once."""
+    groups: dict[tuple[str, ...], set[str]] = {}
+    for block in blocks:
+        groups.setdefault(block.tag_signature, set()).update(_block_lexical_tokens(block))
+    return groups
+
+
+def _lexical_document_frequencies(blocks: list[Block]) -> dict[str, int]:
+    """Counts, per token, how many distinct projects (not stored blocks) contain it."""
+    frequencies: dict[str, int] = {}
+    for token_set in _project_lexical_token_sets(blocks).values():
+        for token in token_set:
+            frequencies[token] = frequencies.get(token, 0) + 1
+    return frequencies
+
+
+def lexical_matches(
+    blocks: list[Block], request: str, *, min_overlap: int = 2, rare_df_max: int = 3
+) -> list[Block]:
+    """Force-include blocks whose corpus-rare, distinctive tokens overlap the request."""
+    request_tokens = _lexical_tokens(request)
+    if not request_tokens:
+        return []
+    df = _lexical_document_frequencies(blocks)
+    matches = []
+    for block in blocks:
+        distinctive = {t for t in _block_lexical_tokens(block) if df.get(t, 0) <= rare_df_max}
+        if not distinctive:
+            continue
+        overlap = distinctive & request_tokens
+        threshold = min(min_overlap, len(distinctive))
+        if len(overlap) >= threshold:
+            matches.append(block)
+    return matches
+
+
 @dataclass(frozen=True)
 class ScoredBlock:
     block: Block
@@ -173,6 +236,7 @@ def rank_blocks(
     top_n: int,
     unmatched_reserve: int = 2,
     keyword_weight: Callable[[str, str], float] | None = None,
+    force_include: list[Block] | None = None,
 ) -> list[Block]:
     """Top-scoring blocks first, plus a fixed (not proportional to top_n) sample of
     zero-scoring blocks so an unmatched block stays visible as a gap-filler option."""
@@ -184,4 +248,15 @@ def rank_blocks(
     top_matched = matched_sorted[:top_n]
     filler = unmatched_sorted[:reserve]
 
-    return [s.block for s in top_matched] + [s.block for s in filler]
+    ranked = [s.block for s in top_matched] + [s.block for s in filler]
+    if not force_include:
+        return ranked
+
+    ranked_ids = {b.id for b in ranked}
+    seen = set()
+    forced = []
+    for block in force_include:
+        if block.id not in ranked_ids and block.id not in seen:
+            seen.add(block.id)
+            forced.append(block)
+    return forced + ranked

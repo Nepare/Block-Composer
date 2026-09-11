@@ -8,6 +8,42 @@ from tools.retrieval import (
     score_block,
 )
 
+# _lexical_tokens/_block_lexical_tokens/_project_lexical_token_sets/_lexical_document_frequencies/
+# lexical_matches don't exist in tools.retrieval yet (TDD -- implementation lands in a later task).
+# Imported lazily inside each test that needs them so a missing name fails only that test, not
+# collection of this whole module (which would also break the pre-existing tests below).
+try:
+    from tools.retrieval import (
+        _block_lexical_tokens,
+        _lexical_document_frequencies,
+        _lexical_tokens,
+        _project_lexical_token_sets,
+        lexical_matches,
+    )
+except ImportError:
+    _lexical_tokens = _block_lexical_tokens = _project_lexical_token_sets = None
+    _lexical_document_frequencies = lexical_matches = None
+
+
+def _conferencing_family_blocks():
+    # 4 stored variants of the same project, sharing one tag_signature -- the
+    # multi-variant blind-spot scenario from research.md
+    return [
+        Block(id="conferencing_software_solution", body="Family base variant.", tags=["conferencing_software_solution"]),
+        Block(id="conferencing_software_solution_mut_a", body="Variant A.", tags=["conferencing_software_solution"]),
+        Block(id="conferencing_software_solution_mut_b", body="Variant B.", tags=["conferencing_software_solution"]),
+        Block(id="conferencing_software_solution_mut_c", body="Variant C.", tags=["conferencing_software_solution"]),
+    ]
+
+
+def _unrelated_singleton_blocks():
+    # untagged -- each is its own tag_signature group; ids share "management"
+    # across both, but neither shares anything with the conferencing family
+    return [
+        Block(id="veterinary_clinic_management", body="## Veterinary Practice\n"),
+        Block(id="restaurant_inventory_management", body="## Restaurant Ops\n"),
+    ]
+
 
 def test_extract_keywords_parses_all_four_categories():
     reply = (
@@ -259,3 +295,171 @@ def test_score_block_keyword_weight_applies_per_matched_keyword():
     scored = score_block(block, keywords, keyword_weight=lambda category, kw: weights[kw])
 
     assert scored.score == 7.5  # 1.5 * (2.0 + 3.0)
+
+
+# --- T006: _lexical_tokens -------------------------------------------------
+
+
+def test_lexical_tokens_lowercases_and_splits_into_word_tokens():
+    tokens = _lexical_tokens("ERP-PDM System")
+
+    assert "erp" in tokens
+    assert "pdm" in tokens
+
+
+def test_lexical_tokens_drops_tokens_of_length_two_or_less():
+    tokens = _lexical_tokens("an id ERP")
+
+    assert "id" not in tokens  # length 2
+    assert "an" not in tokens  # length 2
+    assert "erp" in tokens
+
+
+def test_lexical_tokens_drops_generic_stopwords_but_keeps_distinctive_words():
+    tokens = _lexical_tokens("the conferencing system for the platform project")
+
+    assert "system" not in tokens
+    assert "platform" not in tokens
+    assert "project" not in tokens
+    assert "for" not in tokens
+    assert "the" not in tokens
+    assert "conferencing" in tokens
+
+
+# --- T007: _block_lexical_tokens --------------------------------------------
+
+
+def test_block_lexical_tokens_draws_from_id_tags_and_name():
+    block = Block(id="erp_pdm_system", body="## Conferencing Platform\n\nDetails.\n", tags=["finance_tools"])
+
+    tokens = _block_lexical_tokens(block)
+
+    assert "erp" in tokens
+    assert "pdm" in tokens
+    assert "finance" in tokens
+    assert "conferencing" in tokens
+
+
+def test_block_lexical_tokens_normalizes_underscores_and_dashes_before_tokenizing():
+    block = Block(id="erp-pdm_gizmo", body="Untitled block, no heading.\n")
+
+    tokens = _block_lexical_tokens(block)
+
+    assert "erp" in tokens
+    assert "pdm" in tokens
+    assert "gizmo" in tokens
+    assert "erppdmgizmo" not in tokens  # must not be glued into one token
+
+
+# --- T008: _project_lexical_token_sets / _lexical_document_frequencies -----
+
+
+def test_project_lexical_token_sets_groups_by_tag_signature():
+    family = _conferencing_family_blocks()
+    singletons = _unrelated_singleton_blocks()
+
+    groups = _project_lexical_token_sets(family + singletons)
+
+    # one group for the shared-tag family, one each for the two untagged singletons
+    assert len(groups) == 3
+    family_tokens = groups[family[0].tag_signature]
+    assert "conferencing" in family_tokens
+
+
+def test_lexical_document_frequencies_counts_projects_not_stored_blocks():
+    family = _conferencing_family_blocks()
+    singletons = _unrelated_singleton_blocks()
+
+    dfs = _lexical_document_frequencies(family + singletons)
+
+    # a naive per-block count would see "conferencing" in all 4 stored blocks and report 4;
+    # it must be counted once, for the one project those 4 blocks belong to
+    assert dfs["conferencing"] == 1
+
+
+def test_lexical_document_frequencies_counts_a_word_unique_to_one_singleton_as_one():
+    family = _conferencing_family_blocks()
+    singletons = _unrelated_singleton_blocks()
+
+    dfs = _lexical_document_frequencies(family + singletons)
+
+    assert dfs["veterinary"] == 1
+    assert dfs["restaurant"] == 1
+
+
+def test_lexical_document_frequencies_counts_cross_project_sharing_normally():
+    family = _conferencing_family_blocks()
+    singletons = _unrelated_singleton_blocks()
+
+    dfs = _lexical_document_frequencies(family + singletons)
+
+    # both unrelated singletons independently use "management" -- two distinct
+    # projects sharing a word is still counted normally, unlike within-project duplication
+    assert dfs["management"] == 2
+
+
+# --- T009: lexical_matches ---------------------------------------------------
+
+
+def test_lexical_matches_returns_empty_for_a_request_with_no_lexical_overlap():
+    blocks = _conferencing_family_blocks() + _unrelated_singleton_blocks()
+
+    matches = lexical_matches(blocks, "completely unrelated request text about nothing")
+
+    assert matches == []
+
+
+def test_lexical_matches_force_includes_family_member_despite_variant_count():
+    blocks = _conferencing_family_blocks() + _unrelated_singleton_blocks()
+
+    matches = lexical_matches(blocks, "my conferencing software solution project")
+
+    matched_ids = {b.id for b in matches}
+    family_ids = {b.id for b in _conferencing_family_blocks()}
+    assert matched_ids & family_ids  # at least one family member force-included
+
+
+def test_lexical_matches_excludes_a_token_shared_by_more_than_rare_df_max_projects():
+    rare_df_max = 3
+    # rare_df_max + 1 distinct singleton projects, all sharing the one word "gizmo"
+    blocks = [Block(id=f"gizmo_{i}", body="No heading here.\n") for i in range(rare_df_max + 1)]
+
+    matches = lexical_matches(blocks, "gizmo", rare_df_max=rare_df_max)
+
+    assert matches == []
+
+
+# --- T010: rank_blocks(force_include=...) ------------------------------------
+
+
+def test_rank_blocks_force_include_prepends_ahead_of_score_ranked_output():
+    keywords = CategorizedKeywords(environment=["Jira"])
+    strong = Block(id="strong", body="## A\n\n**Environment:** Jira\n")
+    forced = Block(id="forced", body="## Forced\n\nNo keyword overlap.\n")
+
+    ranked = rank_blocks([strong], keywords, top_n=5, force_include=[forced])
+
+    assert ranked[0].id == "forced"
+    assert ranked[1].id == "strong"
+
+
+def test_rank_blocks_force_include_dedups_a_block_already_in_ranked_output():
+    keywords = CategorizedKeywords(environment=["Jira"])
+    strong = Block(id="strong", body="## A\n\n**Environment:** Jira\n")
+
+    ranked = rank_blocks([strong], keywords, top_n=5, force_include=[strong])
+
+    assert [b.id for b in ranked] == ["strong"]
+
+
+def test_rank_blocks_force_include_none_or_empty_matches_omitting_the_parameter():
+    keywords = CategorizedKeywords(environment=["Jira"])
+    strong = Block(id="strong", body="## A\n\n**Environment:** Jira\n")
+    weak = Block(id="weak", body="## B\n\nNothing relevant.\n")
+
+    without_param = rank_blocks([weak, strong], keywords, top_n=5)
+    with_none = rank_blocks([weak, strong], keywords, top_n=5, force_include=None)
+    with_empty = rank_blocks([weak, strong], keywords, top_n=5, force_include=[])
+
+    assert [b.id for b in with_none] == [b.id for b in without_param]
+    assert [b.id for b in with_empty] == [b.id for b in without_param]

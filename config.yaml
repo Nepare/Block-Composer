@@ -43,6 +43,8 @@ behavior:
     keywords_per_category_min: 0
     keywords_per_category_max: 10 # range of generated keywords per category when processing a request
     plan_max_tokens: 7000 # completion-token cap for the compose planner LLM call
+    named_reference_min_overlap: 2 # minimum distinctive-token overlap to force a block into the compose candidate set
+    named_reference_rare_project_df_max: 3 # a token counts as distinctive only if at most this many projects share it
 
   mutate:
     max_tokens: 900 # completion-token cap for the mutate LLM call

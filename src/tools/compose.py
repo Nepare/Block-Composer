@@ -13,7 +13,7 @@ from core.json_extraction import iter_json_objects
 from llm.prompts import compose_prompt, result_name_prompt
 from llm.router import get_client_and_model
 from core.progress import ProgressEvent, ProgressSink
-from tools.retrieval import extract_retrieval_signals, extract_target_count, rank_blocks
+from tools.retrieval import extract_retrieval_signals, extract_target_count, lexical_matches, rank_blocks
 from storage.base import BlockStorage, Result
 from storage.router import get_block_storage, get_result_storage
 
@@ -43,16 +43,9 @@ def _catalog(blocks: list[Block]) -> list[dict]:
     return [{"id": b.id, "tags": b.tags, "body": b.body.strip()} for b in blocks]
 
 
-def _tag_signature(block: Block) -> tuple[str, ...]:
-    """Identifies the underlying project a block belongs to. mutate.py copies the source's tags
-    onto every variant verbatim, so identical tags means the same project (or a sibling variant
-    of it) — untagged blocks carry no such signal and are each their own singleton."""
-    return tuple(sorted(block.tags)) if block.tags else (f"__id__:{block.id}",)
-
-
 def _next_unused_candidate(candidates: list[Block], claimed_signatures: set[tuple[str, ...]]) -> Block | None:
     for block in candidates:
-        if _tag_signature(block) not in claimed_signatures:
+        if block.tag_signature not in claimed_signatures:
             return block
     return None
 
@@ -145,7 +138,18 @@ def _select_candidate_blocks(
         )
         top_n = required_count
         unmatched_reserve = required_count
-    narrowed = rank_blocks(blocks, keywords, top_n=top_n, unmatched_reserve=unmatched_reserve)
+    narrowed = rank_blocks(
+        blocks,
+        keywords,
+        top_n=top_n,
+        unmatched_reserve=unmatched_reserve,
+        force_include=lexical_matches(
+            blocks,
+            request,
+            min_overlap=settings.behavior.compose.named_reference_min_overlap,
+            rare_df_max=settings.behavior.compose.named_reference_rare_project_df_max,
+        ),
+    )
     progress(
         ProgressEvent(
             kind="narrowing_done", message=f"Narrowed to {len(narrowed)} of {len(blocks)} block(s) in the library"
@@ -282,7 +286,7 @@ def _plan_with_llm(
 
     def sig_for(block_id: str) -> tuple[str, ...]:
         block = id_to_block.get(block_id)
-        return _tag_signature(block) if block is not None else (f"__id__:{block_id}",)
+        return block.tag_signature if block is not None else (f"__id__:{block_id}",)
 
     claimed_signatures: set[tuple[str, ...]] = set()
     unresolved_duplicates: list[ComposeSlot] = []
@@ -291,7 +295,7 @@ def _plan_with_llm(
         if restrict_generate and s.action == "generate":
             replacement = _next_unused_candidate(candidate_blocks, claimed_signatures)
             if replacement is not None:
-                claimed_signatures.add(_tag_signature(replacement))
+                claimed_signatures.add(replacement.tag_signature)
                 s = ComposeSlot(order=s.order, action="use", block_id=replacement.id, criteria=None)
         elif restrict_mutate and s.action == "mutate":
             if s.block_id and sig_for(s.block_id) not in claimed_signatures:
@@ -300,7 +304,7 @@ def _plan_with_llm(
             else:
                 replacement = _next_unused_candidate(candidate_blocks, claimed_signatures)
                 if replacement is not None:
-                    claimed_signatures.add(_tag_signature(replacement))
+                    claimed_signatures.add(replacement.tag_signature)
                     s = ComposeSlot(order=s.order, action="use", block_id=replacement.id, criteria=None)
                 elif not restrict_generate:
                     s = ComposeSlot(order=s.order, action="generate", block_id=None, criteria=s.criteria or request)
@@ -313,7 +317,7 @@ def _plan_with_llm(
             else:
                 replacement = _next_unused_candidate(candidate_blocks, claimed_signatures)
                 if replacement is not None:
-                    claimed_signatures.add(_tag_signature(replacement))
+                    claimed_signatures.add(replacement.tag_signature)
                     s = ComposeSlot(order=s.order, action="use", block_id=replacement.id, criteria=None)
                 elif not restrict_generate:
                     s = ComposeSlot(order=s.order, action="generate", block_id=None, criteria=s.criteria or request)
@@ -343,7 +347,7 @@ def _plan_with_llm(
                     replacement = _next_unused_candidate(candidate_blocks, claimed_signatures)
                     if replacement is None:
                         break
-                    claimed_signatures.add(_tag_signature(replacement))
+                    claimed_signatures.add(replacement.tag_signature)
                     padding.append(
                         ComposeSlot(order=next_order + i, action="use", block_id=replacement.id, criteria=None)
                     )

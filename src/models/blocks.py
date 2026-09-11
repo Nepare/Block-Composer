@@ -37,6 +37,12 @@ class Block:
         """Structured access to this block's own labeled fields — recomputed each access, not cached."""
         return parse_block_body(self.body)
 
+    @property
+    def tag_signature(self) -> tuple[str, ...]:
+        """Identifies the underlying project this block belongs to — blocks sharing this are
+        the same project, or sibling variants of it."""
+        return tuple(sorted(self.tags)) if self.tags else (f"__id__:{self.id}",)
+
     def to_post(self) -> frontmatter.Post:
         meta = {
             "id": self.id,
