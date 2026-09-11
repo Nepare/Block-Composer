@@ -12,7 +12,10 @@ output/cvdocs.db
 
 # Agent state
 .claude/
+.agents/
 CLAUDE.md
+AGENTS.md
+research/
 
 # Specify sessions
 .specify/
